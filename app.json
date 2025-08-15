@@ -3,6 +3,7 @@
     "name": "tfg-info-areacamper",
     "slug": "tfg-info-areacamper",
     "version": "1.0.0",
+    "scheme": "tfg-info-areacamper",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -24,6 +25,9 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-router"
+    ]
   }
 }
