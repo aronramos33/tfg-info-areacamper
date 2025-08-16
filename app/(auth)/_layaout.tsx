@@ -1,14 +1,14 @@
-import { Tabs, useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { useAuth } from '@/providers/AuthProvider';
 
-export default function TabsLayout() {
+export default function AuthLayout() {
   const { user, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && !user) router.replace('/(auth)/sign-in');
+    if (!loading && user) router.replace('/(tabs)');
   }, [loading, user, router]);
 
   if (loading) {
@@ -18,11 +18,6 @@ export default function TabsLayout() {
       </View>
     );
   }
-  if (!user) return null; // está redirigiendo
 
-  return (
-    <Tabs>
-      <Tabs.Screen name="index" options={{ title: 'Inicio' }} />
-    </Tabs>
-  );
+  return <Stack screenOptions={{ headerShown: false }} />;
 }
