@@ -1,6 +1,6 @@
 // app/index.tsx
 import { useEffect } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Linking, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/providers/AuthProvider';
 
@@ -13,6 +13,13 @@ export default function Gate() {
     if (user) router.replace('/(tabs)');
     else router.replace('/(auth)/sign-in');
   }, [loading, user, router]);
+
+  useEffect(() => {
+    const sub = Linking.addEventListener('url', (e) => {
+      console.log('Deep link recibido =>', e.url);
+    });
+    return () => sub.remove();
+  }, []);
 
   // Pantalla neutra mientras decide
   return (

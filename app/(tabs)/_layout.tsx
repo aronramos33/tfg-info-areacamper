@@ -1,28 +1,18 @@
-import { Tabs, useRouter } from 'expo-router';
-import { useEffect } from 'react';
-import { ActivityIndicator, View } from 'react-native';
-import { useAuth } from '@/providers/AuthProvider';
+import { Slot, Redirect } from 'expo-router';
+import { useAuth } from '../../providers/AuthProvider';
+import { View, ActivityIndicator } from 'react-native';
 
 export default function TabsLayout() {
-  const { user, loading } = useAuth();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (!loading && !user) router.replace('/(auth)/sign-in');
-  }, [loading, user, router]);
+  const { session, loading } = useAuth();
 
   if (loading) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator />
       </View>
     );
   }
-  if (!user) return null; // está redirigiendo
+  if (!session) return <Redirect href="/(auth)/sign-in" />;
 
-  return (
-    <Tabs>
-      <Tabs.Screen name="index" options={{ title: 'Inicio' }} />
-    </Tabs>
-  );
+  return <Slot />;
 }

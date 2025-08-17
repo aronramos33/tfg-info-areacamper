@@ -1,7 +1,8 @@
 // lib/supabase.ts
-import 'react-native-url-polyfill/auto'; // Necesario para que URL funcione en RN
+import 'react-native-url-polyfill/auto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, processLock } from '@supabase/supabase-js';
+import { AppState, Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 // 🔑 Lee las claves desde app.config.ts → extra del archivo .env
@@ -12,9 +13,18 @@ const supabaseAnonKey = Constants.expoConfig?.extra
 // 🛠️ Inicializa el cliente de Supabase
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: AsyncStorage, // Guardar tokens de sesión en el móvil
-    autoRefreshToken: true, // Refrescar automáticamente
-    persistSession: true, // Mantener sesión tras cerrar app
-    detectSessionInUrl: false, // En móvil no usamos query params
+    ...(Platform.OS !== 'web' ? { storage: AsyncStorage } : {}),
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: false, // RN: evita loops
+    flowType: 'pkce',
+    lock: processLock,
   },
 });
+
+if (Platform.OS !== 'web') {
+  AppState.addEventListener('change', (state) => {
+    if (state === 'active') supabase.auth.startAutoRefresh();
+    else supabase.auth.stopAutoRefresh();
+  });
+}
