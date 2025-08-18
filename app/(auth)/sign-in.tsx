@@ -1,24 +1,40 @@
-import { View, Text, Button, ActivityIndicator } from 'react-native';
-import { useGoogleAuth } from '../../hooks/useGoogleAuth';
+import React, { useEffect } from 'react';
+import { View, Text, Pressable } from 'react-native';
+import SignInButton from '../../components/SignInButton';
+import { useAuth } from '../../providers/AuthProvider';
+import { useRouter } from 'expo-router';
 
-export default function SignIn() {
-  const { signIn, loading } = useGoogleAuth();
+export default function SignInPage() {
+  const { session, loading, signOut } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (session) {
+      router.replace('/');
+    }
+  }, [router, session]);
 
   return (
-    <View
-      style={{
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        gap: 16,
-      }}
-    >
-      <Text style={{ fontSize: 22, fontWeight: '600' }}>Inicia sesión</Text>
-      {loading ? (
-        <ActivityIndicator />
-      ) : (
-        <Button title="Continuar con Google" onPress={signIn} />
-      )}
+    <View style={{ flex: 1, padding: 24, gap: 16, justifyContent: 'center' }}>
+      <Text style={{ fontSize: 24, fontWeight: '700', textAlign: 'center' }}>
+        SignIn
+      </Text>
+      {!loading && !session ? <SignInButton /> : null}
+
+      {!loading && session ? (
+        <View style={{ gap: 8, alignItems: 'center' }}>
+          <Text style={{ textAlign: 'center' }}>¡Sesión iniciada!</Text>
+          <Text style={{ textAlign: 'center' }}>
+            Email: {session.user.email}
+          </Text>
+          <Pressable
+            onPress={signOut}
+            style={{ backgroundColor: '#222', padding: 12, borderRadius: 10 }}
+          >
+            <Text style={{ color: 'white' }}>Cerrar sesión</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }

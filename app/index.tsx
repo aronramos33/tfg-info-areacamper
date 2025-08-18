@@ -2,17 +2,17 @@
 import { useEffect } from 'react';
 import { ActivityIndicator, Linking, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useAuth } from '@/providers/AuthProvider';
+import { useAuth } from '../providers/AuthProvider';
 
 export default function Gate() {
-  const { user, loading } = useAuth();
+  const { session, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
     if (loading) return; // espera a que AuthProvider cargue
-    if (user) router.replace('/(tabs)');
+    if (session) router.replace('/(tabs)');
     else router.replace('/(auth)/sign-in');
-  }, [loading, user, router]);
+  }, [loading, session, router]);
 
   useEffect(() => {
     const sub = Linking.addEventListener('url', (e) => {
