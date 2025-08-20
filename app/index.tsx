@@ -5,14 +5,15 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '../providers/AuthProvider';
 
 export default function Gate() {
-  const { session, loading } = useAuth();
-  const router = useRouter();
+  const { session, loading } = useAuth(); //Se obtiene la sesión y el estado de carga del contexto a través del hook useAuth.
+  const router = useRouter(); //Se obtiene el router para redirigir al usuario a las diferentes rutas.
 
   useEffect(() => {
     if (loading) return; // espera a que AuthProvider cargue
-    if (session) router.replace('/(tabs)');
-    else router.replace('/(auth)/sign-in');
-  }, [loading, session, router]);
+    if (session)
+      router.replace('/(tabs)'); //Si el usuario esta logueado, se redirige a la ruta (tabs)
+    else router.replace('/(auth)/sign-in'); //Si el usuario no esta logueado se va a sign-in.
+  }, [loading, session, router]); //lo que hay entre [] es lo que cambia para volver a cargar el componente del useEffect.
 
   useEffect(() => {
     const sub = Linking.addEventListener('url', (e) => {
@@ -27,4 +28,4 @@ export default function Gate() {
       <ActivityIndicator />
     </View>
   );
-}
+} //Este componente es el que se encarga de redirigir al usuario a las diferentes rutas, dependiendo de si esta logueado o no.

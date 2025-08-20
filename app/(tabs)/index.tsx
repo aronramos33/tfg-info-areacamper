@@ -3,6 +3,7 @@ import { View, Text, Button, StyleSheet, Alert } from 'react-native';
 import { useAuth } from '../../providers/AuthProvider';
 
 export default function HomeScreen() {
+  //Aquí va una vez identificado.
   const { session, signOut } = useAuth();
 
   const handleSignOut = async () => {

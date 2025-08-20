@@ -23,4 +23,4 @@ export default function RootLayout() {
       <Slot />
     </AuthProvider>
   );
-}
+} //Envuelve cada pantalla con el AuthProvider.

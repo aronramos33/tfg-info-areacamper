@@ -19,3 +19,4 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: false, // lo maneja AuthSession
   },
 });
+//Inicia la conexión con la base de datos a través de nuestro url y key de supabase
