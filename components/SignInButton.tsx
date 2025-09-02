@@ -1,11 +1,13 @@
 import React, { useCallback, useState } from 'react';
-import { Pressable, Text, ActivityIndicator, View } from 'react-native';
+import { Text, View } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import { supabase } from '../lib/supabase';
+import AppButton from './AppButton';
 
 // URL de retorno para OAuth (funciona en Expo Go y builds nativas)
-const redirectTo = Linking.createURL('/'); //Genera la url de retorno para el OAuth, es decir, la url a la que se redirigirá el usuario cuando termine el proceso de OAuth, en este caso es nuestra ruta raiz (index.tsx).
+const redirectTo = Linking.createURL('/');
+//Genera la url de retorno para el OAuth, es decir, la url a la que se redirigirá el usuario cuando termine el proceso de OAuth, en este caso es nuestra ruta raiz (index.tsx).
 
 export const SignInButton: React.FC<{ label?: string }> = ({
   label = 'Iniciar sesión con Google',
@@ -68,27 +70,7 @@ export const SignInButton: React.FC<{ label?: string }> = ({
 
   return (
     <View style={{ width: '100%' }}>
-      <Pressable
-        onPress={handlePress}
-        disabled={loading}
-        style={({ pressed }) => ({
-          opacity: pressed || loading ? 0.7 : 1,
-          backgroundColor: '#1a73e8',
-          paddingVertical: 14,
-          paddingHorizontal: 16,
-          borderRadius: 12,
-          alignItems: 'center',
-          justifyContent: 'center',
-        })}
-      >
-        {loading ? (
-          <ActivityIndicator />
-        ) : (
-          <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
-            {label}
-          </Text>
-        )}
-      </Pressable>
+      <AppButton onPress={handlePress} title={label} loading={loading} />
       {error ? (
         <Text style={{ color: 'crimson', marginTop: 8, textAlign: 'center' }}>
           {error}

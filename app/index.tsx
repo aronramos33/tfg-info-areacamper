@@ -10,10 +10,13 @@ export default function Gate() {
 
   useEffect(() => {
     if (loading) return; // espera a que AuthProvider cargue
-    if (session)
-      router.replace('/(tabs)'); //Si el usuario esta logueado, se redirige a la ruta (tabs)
-    else router.replace('/(auth)/sign-in'); //Si el usuario no esta logueado se va a sign-in.
-  }, [loading, session, router]); //lo que hay entre [] es lo que cambia para volver a cargar el componente del useEffect.
+    // Si loading ya terminó, chequeamos session
+    if (session) {
+      router.replace('/(tabs)');
+    } else {
+      router.replace('/(auth)/options');
+    }
+  }, [loading, session, router]);
 
   useEffect(() => {
     const sub = Linking.addEventListener('url', (e) => {

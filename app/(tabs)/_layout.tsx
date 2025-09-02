@@ -12,7 +12,7 @@ export default function TabsLayout() {
       </View>
     );
   }
-  if (!session) return <Redirect href="/(auth)/sign-in" />;
+  if (!session) return <Redirect href="/(auth)/options" />;
 
   return <Slot />;
 }
