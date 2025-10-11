@@ -3,10 +3,13 @@ import { Pressable, Text, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/providers/AuthProvider';
 import { useEffect } from 'react';
+import * as Linking from 'expo-linking';
 
 export default function SignInPage() {
   const { session, loading } = useAuth();
   const router = useRouter();
+  const redirectTo = Linking.createURL('/');
+  console.log('Redirect URL:', redirectTo);
 
   useEffect(() => {
     if (session) {

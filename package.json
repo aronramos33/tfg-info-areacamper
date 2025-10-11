@@ -13,31 +13,34 @@
     "check": "npm run lint && npm run format && npm run typecheck"
   },
   "dependencies": {
-    "@react-native-async-storage/async-storage": "2.1.2",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-google-signin/google-signin": "^15.0.0",
     "@supabase/supabase-js": "^2.55.0",
-    "expo": "53.0.22",
-    "expo-auth-session": "~6.2.1",
-    "expo-linking": "~7.1.7",
-    "expo-router": "~5.1.5",
-    "expo-status-bar": "~2.2.3",
-    "expo-web-browser": "~14.2.0",
-    "react": "19.0.0",
-    "react-native": "0.79.5",
-    "react-native-safe-area-context": "5.4.0",
-    "react-native-screens": "~4.11.1",
+    "expo": "^54.0.13",
+    "expo-auth-session": "~7.0.8",
+    "expo-linking": "~8.0.8",
+    "expo-router": "~6.0.12",
+    "expo-status-bar": "~3.0.8",
+    "expo-web-browser": "~15.0.8",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native": "0.81.4",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-screens": "~4.16.0",
     "react-native-url-polyfill": "^2.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@react-native/eslint-config": "^0.81.0",
-    "@types/react": "~19.0.10",
+    "@types/react": "~19.1.10",
+    "@types/react-dom": "~19.1.7",
     "babel-plugin-module-resolver": "^5.0.2",
     "dotenv": "^17.2.1",
     "eslint": "^8.57.1",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.6.2",
-    "typescript": "~5.8.3"
+    "typescript": "~5.9.2"
   },
-  "private": true
+  "private": true,
+  "overrides": {}
 }
