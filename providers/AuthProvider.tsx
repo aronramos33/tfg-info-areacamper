@@ -14,6 +14,28 @@ const AuthContext = createContext<AuthContextValue>({
   signOut: async () => {},
 }); //Define el valor por defecto del contexto definido anteriormente
 
+async function ensureUserProfile(userId: string) {
+  try {
+    // upsert atómico para evitar “duplicate key” en carreras
+    const { error } = await supabase.from('user_profiles').upsert(
+      {
+        user_id: userId,
+        full_name: 'Sin nombre',
+        phone: '',
+        dni: '',
+        license_plate: '',
+        role: 'traveler',
+        preferred_locale: 'es',
+        accepted_terms_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' },
+    );
+    if (error) console.warn('[ensureUserProfile] upsert error', error);
+  } catch (e) {
+    console.warn('[ensureUserProfile] fatal', e);
+  }
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
@@ -25,14 +47,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     // Cargar sesión al inicio
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
-      setSession(data.session ?? null);
+      setSession(data.session ?? null); // ✅ primero fijamos sesión
+
+      const uid = data.session?.user?.id;
+      if (uid) {
+        void ensureUserProfile(uid);
+      } // ✅ luego, fire-and-forget (sin await)
+
       setLoading(false);
     }); //Sirve para saber si el usuario esta logueado o no
 
     // Suscribirse a cambios de auth
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
-      setSession(sess ?? null); //El operador ?? es para que si no hay sesión, se ponga null
-    }); //Cada vez que el usuario se loguea o desloguea, se actualiza el estado de la sesión
+    const { data: sub } = supabase.auth.onAuthStateChange(
+      async (_event, sess) => {
+        setSession(sess ?? null); // ✅ primero sesión
+
+        const uid = sess?.user?.id;
+        if (uid) {
+          void ensureUserProfile(uid);
+        } // ✅ luego perfil (sin bloquear)
+      },
+    ); //Cada vez que el usuario se loguea o desloguea, se actualiza el estado de la sesión
 
     return () => {
       mounted = false;
