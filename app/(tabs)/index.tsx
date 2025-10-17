@@ -4,7 +4,7 @@ import { useAuth } from '../../providers/AuthProvider';
 
 export default function HomeScreen() {
   //Aquí va una vez identificado.
-  const { session, signOut } = useAuth();
+  const { session, signOut, profile, isOwner } = useAuth();
 
   const handleSignOut = async () => {
     Alert.alert(
@@ -37,6 +37,12 @@ export default function HomeScreen() {
 
           <Text style={styles.label}>ID de usuario:</Text>
           <Text style={styles.value}>{session.user.id}</Text>
+          <Text style={{ fontSize: 18 }}>
+            {profile?.full_name ? `Hola, ${profile.full_name}` : 'Hola'}
+          </Text>
+          {isOwner ? (
+            <Text style={{ color: 'green' }}>Eres propietario ✅</Text>
+          ) : null}
         </View>
       )}
 
