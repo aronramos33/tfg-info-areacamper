@@ -1,5 +1,7 @@
+import 'react-native-gesture-handler';
 import { Slot } from 'expo-router';
 import { AuthProvider } from '../providers/AuthProvider';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Linking from 'expo-linking';
 import { useEffect } from 'react';
 import { supabase } from '../lib/supabase';
@@ -19,8 +21,10 @@ export default function RootLayout() {
   }, [url]);
 
   return (
-    <AuthProvider>
-      <Slot />
-    </AuthProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <Slot />
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 } //Envuelve cada pantalla con el AuthProvider.

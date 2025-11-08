@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, Button, StyleSheet, Alert } from 'react-native';
 import { useAuth } from '../../providers/AuthProvider';
+import { router } from 'expo-router';
 
 export default function HomeScreen() {
   //Aquí va una vez identificado.
@@ -49,6 +50,11 @@ export default function HomeScreen() {
       )}
 
       <Button title="Cerrar sesión" onPress={handleSignOut} color="#ff4444" />
+      <Button
+        title="Search"
+        onPress={() => router.push('/search')}
+        color="#ff4444"
+      />
     </View>
   );
 }
