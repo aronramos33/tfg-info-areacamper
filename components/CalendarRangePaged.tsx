@@ -6,7 +6,6 @@ import {
   useDateRange,
   type CalendarTheme,
 } from '@marceloterreiro/flash-calendar';
-import { fetchSoldOutDateIds } from '@/services/availability';
 
 /* === Tema negro/blanco seguro === */
 const BLACK = '#000';
@@ -30,12 +29,12 @@ export const blackOnWhiteTheme: CalendarTheme = {
   itemDay: {
     idle: ({ isWeekend }) => ({
       container: { backgroundColor: 'transparent', borderRadius: 6 },
-      content: { color: isWeekend ? MUTED : BLACK },
+      content: { color: isWeekend ? BLACK : BLACK },
     }),
     today: ({ isPressed }) => ({
       container: {
         borderColor: MUTED,
-        borderWidth: 1,
+        borderWidth: 3,
         borderRadius: isPressed ? 6 : 16,
         backgroundColor: isPressed ? BLACK : 'transparent',
       },
@@ -73,13 +72,8 @@ export default function CalendarRangePaged({
   monthsWindow = 12,
 }: Props) {
   // Hook oficial de rango
-  const {
-    calendarActiveDateRanges,
-    onCalendarDayPress,
-    dateRange,
-    isDateRangeValid,
-    onClearDateRange,
-  } = useDateRange();
+  const { onCalendarDayPress, dateRange, isDateRangeValid, onClearDateRange } =
+    useDateRange();
 
   // Ventana de meses (rodante): hoy .. +N-1 meses
   const today = dayjs().startOf('day');
@@ -95,16 +89,6 @@ export default function CalendarRangePaged({
     () => monthCursor.format('YYYY-MM-DD'),
     [monthCursor],
   );
-
-  // Días deshabilitados para TODA la ventana (se calcula una vez)
-  const [disabledIds, setDisabledIds] = useState<string[]>([]);
-  useEffect(() => {
-    const fromId = windowStart.startOf('month').format('YYYY-MM-DD');
-    const toExclusive = windowEnd.add(1, 'day').format('YYYY-MM-DD');
-    fetchSoldOutDateIds(fromId, toExclusive)
-      .then(setDisabledIds)
-      .catch(() => setDisabledIds([]));
-  }, [windowStart, windowEnd]);
 
   // Evita bucles al propagar el rango
   const last = useRef<{ startId?: string; endId?: string }>({});
@@ -126,13 +110,7 @@ export default function CalendarRangePaged({
     }
   }, [isDateRangeValid, startId, endId, onChange]);
 
-  const selectionKey = useMemo(
-    () =>
-      calendarActiveDateRanges
-        .map((r) => `${r.startId ?? ''}-${r.endId ?? ''}`)
-        .join('|'),
-    [calendarActiveDateRanges],
-  );
+  const selectionKey = `${startId ?? ''}-${endId ?? startId ?? ''}`;
 
   // Controles Prev/Sig con límites de ventana
   const atStart =
@@ -141,6 +119,12 @@ export default function CalendarRangePaged({
   const atEnd =
     monthCursor.isSame(windowEnd, 'month') ||
     monthCursor.isAfter(windowEnd, 'month');
+
+  const activeRanges = useMemo(() => {
+    if (startId && endId && isDateRangeValid) return [{ startId, endId }];
+    if (startId && !endId) return [{ startId, endId: startId }]; // ← pinta el primer día
+    return [];
+  }, [isDateRangeValid, startId, endId]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -180,10 +164,9 @@ export default function CalendarRangePaged({
         key={`${monthId}-${selectionKey}`} /* 👈 fuerza rerender al seleccionar */
         calendarMonthId={monthId}
         calendarFirstDayOfWeek="monday"
-        calendarMinDateId={windowStart.startOf('month').format('YYYY-MM-DD')}
+        calendarMinDateId={today.format('YYYY-MM-DD')}
         calendarMaxDateId={windowEnd.format('YYYY-MM-DD')}
-        calendarDisabledDateIds={disabledIds}
-        calendarActiveDateRanges={calendarActiveDateRanges}
+        calendarActiveDateRanges={activeRanges}
         onCalendarDayPress={onCalendarDayPress}
         calendarDayHeight={34}
         theme={blackOnWhiteTheme}
