@@ -13,7 +13,7 @@ export default function SignInPage() {
 
   useEffect(() => {
     if (session) {
-      router.replace('/');
+      router.replace('/(main)/qr');
     }
   }, [router, session]);
 

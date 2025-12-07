@@ -1,6 +1,7 @@
+// app/(auth)/_layout.tsx
 import { Slot, Redirect } from 'expo-router';
-import { useAuth } from '../../providers/AuthProvider';
 import { View, ActivityIndicator } from 'react-native';
+import { useAuth } from '../../providers/AuthProvider';
 
 export default function AuthLayout() {
   const { session, loading } = useAuth();
@@ -12,7 +13,12 @@ export default function AuthLayout() {
       </View>
     );
   }
-  if (session) return <Redirect href="/(tabs)" />;
 
+  // Si ya está logueado, no tiene sentido verlo aquí → lo sacamos a main
+  if (session) {
+    return <Redirect href="/(main)/qr" />;
+  }
+
+  // Si NO hay sesión, puede ver options, sign-in, sign-up sin problema
   return <Slot />;
 }

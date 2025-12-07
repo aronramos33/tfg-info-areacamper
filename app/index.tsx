@@ -5,18 +5,20 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '../providers/AuthProvider';
 
 export default function Gate() {
-  const { session, loading } = useAuth(); //Se obtiene la sesión y el estado de carga del contexto a través del hook useAuth.
+  const { session, loading, isOwner } = useAuth(); //Se obtiene la sesión y el estado de carga del contexto a través del hook useAuth.
   const router = useRouter(); //Se obtiene el router para redirigir al usuario a las diferentes rutas.
 
   useEffect(() => {
     if (loading) return; // espera a que AuthProvider cargue
     // Si loading ya terminó, chequeamos session
-    if (session) {
-      router.replace('/(tabs)');
+    if (session && isOwner) {
+      router.replace('/(admin)/qr');
+    } else if (session) {
+      router.replace('/(main)/qr');
     } else {
-      router.replace('/(auth)/options');
+      router.replace('/(main)/services');
     }
-  }, [loading, session, router]);
+  }, [loading, session, isOwner, router]);
 
   useEffect(() => {
     const sub = Linking.addEventListener('url', (e) => {
