@@ -2,11 +2,51 @@ import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
+type ExtraSummary = {
+  code?: 'PET' | 'POWER' | 'PERSON' | string;
+  name: string;
+  units?: number; // ahora llega como units desde checkout
+};
+
 export default function SuccessPage() {
   const router = useRouter();
-  const { startDate, endDate, nights, total, extras } = useLocalSearchParams();
+  const { startDate, endDate, nights, total, extras } = useLocalSearchParams<{
+    startDate?: string;
+    endDate?: string;
+    nights?: string;
+    total?: string;
+    extras?: string;
+  }>();
 
-  const parsedExtras = extras ? JSON.parse(extras as string) : [];
+  const parsedExtras: ExtraSummary[] = extras ? JSON.parse(extras) : [];
+
+  const formatExtraLine = (ex: ExtraSummary) => {
+    const units = Number(ex.units ?? 0);
+
+    // Electricidad: Sí/No
+    if (ex.code === 'POWER') {
+      return `• ${ex.name} — ${units === 1 ? 'Sí' : 'No'}`;
+    }
+
+    // Mascota y Acompañante: unidades + noches
+    const label =
+      ex.code === 'PET'
+        ? units === 1
+          ? 'mascota'
+          : 'mascotas'
+        : ex.code === 'PERSON'
+          ? units === 1
+            ? 'acompañante'
+            : 'acompañantes'
+          : units === 1
+            ? 'unidad'
+            : 'unidades';
+
+    // Si units es 0, no mostramos (aunque normalmente no llega)
+    if (units <= 0) return null;
+
+    return `• ${ex.name} — ${units} ${label}`;
+  };
 
   return (
     <View style={styles.container}>
@@ -14,7 +54,6 @@ export default function SuccessPage() {
 
       <Text style={styles.title}>¡Reserva completada!</Text>
 
-      {/* --- ÚNICA CARD con toda la información --- */}
       <View style={styles.card}>
         <Text style={styles.label}>Entrada:</Text>
         <Text style={styles.value}>{startDate}</Text>
@@ -25,26 +64,29 @@ export default function SuccessPage() {
         <Text style={styles.label}>Noches:</Text>
         <Text style={styles.value}>{nights}</Text>
 
-        {/* Extras integrados dentro de la misma card */}
         {parsedExtras.length > 0 && (
           <>
             <Text style={[styles.label, { marginTop: 12 }]}>
               Extras añadidos:
             </Text>
 
-            {parsedExtras.map((ex: any, idx: number) => (
-              <Text key={idx} style={styles.extraItem}>
-                • {ex.name} — {ex.nights} noche(s)
-              </Text>
-            ))}
+            {parsedExtras
+              .map(formatExtraLine)
+              .filter(Boolean)
+              .map((line, idx) => (
+                <Text key={idx} style={styles.extraItem}>
+                  {line}
+                </Text>
+              ))}
           </>
         )}
 
         <Text style={[styles.label, { marginTop: 12 }]}>Total pagado:</Text>
-        <Text style={styles.value}>{Number(total) / 100} €</Text>
+        <Text style={styles.value}>
+          {(Number(total ?? 0) / 100).toFixed(2)} €
+        </Text>
       </View>
 
-      {/* Botón QR */}
       <Pressable
         style={styles.primaryButton}
         onPress={() => router.replace('/(main)/qr')}
@@ -52,7 +94,6 @@ export default function SuccessPage() {
         <Text style={styles.primaryText}>Ver mi código QR</Text>
       </Pressable>
 
-      {/* Botón volver al calendario */}
       <Pressable
         style={styles.secondaryButton}
         onPress={() => router.replace('/(main)/reservations')}

@@ -1,5 +1,5 @@
-// app/(flow)/reservation-checkout.tsx  (o donde lo tengas)
-import React, { useEffect, useState } from 'react';
+// app/(flow)/reservation-checkout.tsx
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -27,9 +27,11 @@ type UserProfile = {
 
 type Extra = {
   id: number;
+  code: 'PET' | 'POWER' | 'PERSON' | string;
   name_es: string;
   unit_amount_cents: number;
   is_active: boolean;
+  pricing_type: 'per_night' | string; // ya los 3 son per_night
 };
 
 export default function CheckoutScreen() {
@@ -60,11 +62,23 @@ export default function CheckoutScreen() {
 
   const baseTotal = nights * NIGHTLY_CENTS;
 
-  // 🔢 TOTAL EXTRAS: precio_noche * nº_noches_extra (NO * noches_totales)
-  const extrasTotal = extras.reduce((sum, e) => {
-    const qty = extraQuantities[e.id] ?? 0; // nº de noches que quiero ese extra
-    return sum + qty * e.unit_amount_cents;
-  }, 0);
+  // Reglas por code
+  // - POWER (Electricidad): checkbox sí/no (0/1)
+  // - PET (Mascota): unidades hasta 4
+  // - PERSON (Acompañante): unidades hasta 4
+  const isToggleExtra = (e: Extra) => e.code === 'POWER';
+  const maxUnitsForExtra = (e: Extra) => (isToggleExtra(e) ? 1 : 4);
+
+  // ✅ total de línea = unidades * noches * precio_noche
+  const lineTotalCents = (e: Extra, units: number) =>
+    units * nights * e.unit_amount_cents;
+
+  const extrasTotal = useMemo(() => {
+    return extras.reduce((sum, e) => {
+      const units = extraQuantities[e.id] ?? 0;
+      return sum + units * nights * e.unit_amount_cents;
+    }, 0);
+  }, [extras, extraQuantities, nights]);
 
   const finalTotal = baseTotal + extrasTotal;
 
@@ -89,11 +103,13 @@ export default function CheckoutScreen() {
         // extras activos
         const { data: extrasData } = await supabase
           .from('extras')
-          .select('*')
+          .select(
+            'id, code, name_es, unit_amount_cents, is_active, pricing_type',
+          )
           .eq('is_active', true)
           .order('id');
 
-        if (extrasData) setExtras(extrasData);
+        if (extrasData) setExtras(extrasData as Extra[]);
       } catch (e) {
         console.warn(e);
       } finally {
@@ -162,14 +178,15 @@ export default function CheckoutScreen() {
       const extrasToInsert = extras
         .filter((e) => (extraQuantities[e.id] ?? 0) > 0)
         .map((e) => {
-          const qty = extraQuantities[e.id]; // nº de noches para ese extra
+          const units = extraQuantities[e.id] ?? 0;
+
           return {
             reservation_id: reservation.id,
             extra_id: e.id,
-            quantity: qty,
+            quantity: units, // ✅ unidades (mascotas/acomp.) o 0/1 electricidad
             pricing_type: 'per_night',
             unit_amount_cents: e.unit_amount_cents,
-            line_total_cents: e.unit_amount_cents * qty, // 👈 SOLO qty, nada de * nights
+            line_total_cents: lineTotalCents(e, units), // ✅ unidades * noches
           };
         });
 
@@ -189,8 +206,9 @@ export default function CheckoutScreen() {
             extras
               .filter((e) => (extraQuantities[e.id] ?? 0) > 0)
               .map((e) => ({
+                code: e.code,
                 name: e.name_es,
-                nights: extraQuantities[e.id],
+                units: extraQuantities[e.id],
               })),
           ),
         },
@@ -282,7 +300,10 @@ export default function CheckoutScreen() {
           </Text>
 
           {extras.map((extra) => {
-            const qty = extraQuantities[extra.id] ?? 0;
+            const qty = extraQuantities[extra.id] ?? 0; // unidades o 0/1
+            const isToggle = isToggleExtra(extra);
+            const maxQty = maxUnitsForExtra(extra);
+            const lineTotal = lineTotalCents(extra, qty);
 
             return (
               <View
@@ -294,64 +315,133 @@ export default function CheckoutScreen() {
                   marginBottom: 12,
                 }}
               >
-                <View>
+                <View style={{ flex: 1, paddingRight: 12 }}>
                   <Text style={{ fontSize: 16, fontWeight: '500' }}>
                     {extra.name_es}
                   </Text>
                   <Text style={{ color: '#555' }}>
                     {formatCents(extra.unit_amount_cents)} / noche
                   </Text>
+
                   {qty > 0 && (
                     <Text style={{ fontSize: 12, color: '#777', marginTop: 2 }}>
-                      {qty} noche(s) →{' '}
-                      {formatCents(qty * extra.unit_amount_cents)}
+                      {isToggle ? (
+                        <>
+                          Activado × {nights} noche(s) →{' '}
+                          {formatCents(lineTotal)}
+                        </>
+                      ) : (
+                        <>
+                          {qty} unidad(es) × {nights} noche(s) →{' '}
+                          {formatCents(lineTotal)}
+                        </>
+                      )}
                     </Text>
                   )}
                 </View>
 
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    gap: 8,
-                    alignItems: 'center',
-                  }}
-                >
+                {/* Controles */}
+                {isToggle ? (
+                  // ✅ Electricidad checkbox Sí/No
                   <Pressable
                     onPress={() =>
                       setExtraQuantities((prev) => ({
                         ...prev,
-                        [extra.id]: Math.max(0, qty - 1),
+                        [extra.id]: prev[extra.id] === 1 ? 0 : 1,
                       }))
                     }
                     style={{
-                      backgroundColor: '#EEE',
-                      paddingVertical: 6,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 10,
+                      paddingVertical: 8,
                       paddingHorizontal: 10,
-                      borderRadius: 8,
+                      borderRadius: 10,
+                      backgroundColor: '#F2F4F8',
                     }}
                   >
-                    <Text>-</Text>
+                    <View
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: 6,
+                        borderWidth: 2,
+                        borderColor: qty === 1 ? '#1A73E8' : '#999',
+                        backgroundColor: qty === 1 ? '#1A73E8' : 'transparent',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      {qty === 1 ? (
+                        <Text
+                          style={{
+                            color: '#fff',
+                            fontSize: 14,
+                            fontWeight: '700',
+                            lineHeight: 16,
+                          }}
+                        >
+                          ✓
+                        </Text>
+                      ) : null}
+                    </View>
+
+                    <Text style={{ fontWeight: '600' }}>
+                      {qty === 1 ? 'Sí' : 'No'}
+                    </Text>
                   </Pressable>
-
-                  <Text style={{ width: 28, textAlign: 'center' }}>{qty}</Text>
-
-                  <Pressable
-                    onPress={() =>
-                      setExtraQuantities((prev) => ({
-                        ...prev,
-                        [extra.id]: Math.min(nights, qty + 1),
-                      }))
-                    }
+                ) : (
+                  // ✅ Mascotas + Acompañante unidades hasta 4
+                  <View
                     style={{
-                      backgroundColor: '#EEE',
-                      paddingVertical: 6,
-                      paddingHorizontal: 10,
-                      borderRadius: 8,
+                      flexDirection: 'row',
+                      gap: 8,
+                      alignItems: 'center',
                     }}
                   >
-                    <Text>+</Text>
-                  </Pressable>
-                </View>
+                    <Pressable
+                      onPress={() =>
+                        setExtraQuantities((prev) => ({
+                          ...prev,
+                          [extra.id]: Math.max(0, qty - 1),
+                        }))
+                      }
+                      style={{
+                        backgroundColor: '#EEE',
+                        paddingVertical: 6,
+                        paddingHorizontal: 10,
+                        borderRadius: 8,
+                        opacity: qty === 0 ? 0.5 : 1,
+                      }}
+                      disabled={qty === 0}
+                    >
+                      <Text>-</Text>
+                    </Pressable>
+
+                    <Text style={{ width: 28, textAlign: 'center' }}>
+                      {qty}
+                    </Text>
+
+                    <Pressable
+                      onPress={() =>
+                        setExtraQuantities((prev) => ({
+                          ...prev,
+                          [extra.id]: Math.min(maxQty, qty + 1),
+                        }))
+                      }
+                      style={{
+                        backgroundColor: '#EEE',
+                        paddingVertical: 6,
+                        paddingHorizontal: 10,
+                        borderRadius: 8,
+                        opacity: qty >= maxQty ? 0.5 : 1,
+                      }}
+                      disabled={qty >= maxQty}
+                    >
+                      <Text>+</Text>
+                    </Pressable>
+                  </View>
+                )}
               </View>
             );
           })}
