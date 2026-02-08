@@ -8,9 +8,10 @@ import {
   Alert,
   Pressable,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import dayjs from 'dayjs';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as WebBrowser from 'expo-web-browser';
 
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
@@ -35,7 +36,6 @@ type Extra = {
 };
 
 export default function CheckoutScreen() {
-  const router = useRouter();
   const { session } = useAuth();
 
   const { startDate, endDate } = useLocalSearchParams<{
@@ -170,6 +170,7 @@ export default function CheckoutScreen() {
         .single();
 
       if (error || !reservation) {
+        console.warn(error);
         Alert.alert('Error', 'No se ha podido crear la reserva.');
         return;
       }
@@ -191,28 +192,44 @@ export default function CheckoutScreen() {
         });
 
       if (extrasToInsert.length > 0) {
-        await supabase.from('reservation_extras').insert(extrasToInsert);
+        const { error: extrasErr } = await supabase
+          .from('reservation_extras')
+          .insert(extrasToInsert);
+        if (extrasErr) {
+          console.warn(extrasErr);
+          Alert.alert('Error', 'No se han podido guardar los extras.');
+          return;
+        }
       }
 
-      // 3) ir a success
-      router.replace({
-        pathname: '/(screens)/success',
-        params: {
-          nights,
-          total: finalTotal,
-          startDate,
-          endDate,
-          extras: JSON.stringify(
-            extras
-              .filter((e) => (extraQuantities[e.id] ?? 0) > 0)
-              .map((e) => ({
-                code: e.code,
-                name: e.name_es,
-                units: extraQuantities[e.id],
-              })),
-          ),
+      // 3) Crear Checkout Session (Edge Function) y abrir Stripe Checkout
+      const reservationIdNum = Number(reservation.id);
+
+      const { data: fnData, error: fnError } = await supabase.functions.invoke(
+        'create-checkout-session',
+        {
+          body: { reservation_id: reservationIdNum },
         },
-      });
+      );
+
+      if (fnError) {
+        console.log('create-checkout-session error:', fnError);
+        Alert.alert(
+          'Error',
+          fnError.message ?? 'No se ha podido iniciar el pago.',
+        );
+        return;
+      }
+
+      if (!fnData?.url) {
+        console.log('create-checkout-session data:', fnData);
+        Alert.alert('Error', 'Respuesta inválida al iniciar el pago.');
+        return;
+      }
+
+      await WebBrowser.openBrowserAsync(fnData.url);
+
+      // Nota: el usuario volverá por deep link a /success o /checkout (cancel)
     } catch (e) {
       console.warn(e);
       Alert.alert('Error', 'Ha ocurrido un problema al crear la reserva.');
@@ -403,22 +420,22 @@ export default function CheckoutScreen() {
                       onPress={() =>
                         setExtraQuantities((prev) => ({
                           ...prev,
-                          [extra.id]: Math.max(0, qty - 1),
+                          [extra.id]: Math.max(0, (prev[extra.id] ?? 0) - 1),
                         }))
                       }
                       style={{
-                        backgroundColor: '#EEE',
-                        paddingVertical: 6,
-                        paddingHorizontal: 10,
-                        borderRadius: 8,
-                        opacity: qty === 0 ? 0.5 : 1,
+                        width: 34,
+                        height: 34,
+                        borderRadius: 10,
+                        backgroundColor: '#F2F4F8',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                       }}
-                      disabled={qty === 0}
                     >
-                      <Text>-</Text>
+                      <Text style={{ fontSize: 18, fontWeight: '800' }}>−</Text>
                     </Pressable>
 
-                    <Text style={{ width: 28, textAlign: 'center' }}>
+                    <Text style={{ minWidth: 18, textAlign: 'center' }}>
                       {qty}
                     </Text>
 
@@ -426,42 +443,49 @@ export default function CheckoutScreen() {
                       onPress={() =>
                         setExtraQuantities((prev) => ({
                           ...prev,
-                          [extra.id]: Math.min(maxQty, qty + 1),
+                          [extra.id]: Math.min(
+                            maxQty,
+                            (prev[extra.id] ?? 0) + 1,
+                          ),
                         }))
                       }
                       style={{
-                        backgroundColor: '#EEE',
-                        paddingVertical: 6,
-                        paddingHorizontal: 10,
-                        borderRadius: 8,
-                        opacity: qty >= maxQty ? 0.5 : 1,
+                        width: 34,
+                        height: 34,
+                        borderRadius: 10,
+                        backgroundColor: '#F2F4F8',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                       }}
-                      disabled={qty >= maxQty}
                     >
-                      <Text>+</Text>
+                      <Text style={{ fontSize: 18, fontWeight: '800' }}>+</Text>
                     </Pressable>
                   </View>
                 )}
               </View>
             );
           })}
-
-          <Text style={{ fontWeight: '700', marginTop: 8 }}>
-            Total extras: {formatCents(extrasTotal)}
-          </Text>
         </View>
 
         {/* Total final */}
-        <Text
+        <View
           style={{
-            fontSize: 22,
-            fontWeight: '700',
-            textAlign: 'center',
+            backgroundColor: '#fff',
+            padding: 16,
+            borderRadius: 16,
             marginBottom: 16,
+            elevation: 2,
           }}
         >
-          Total final: {formatCents(finalTotal)}
-        </Text>
+          <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: 8 }}>
+            Total
+          </Text>
+          <Text>Base: {formatCents(baseTotal)}</Text>
+          <Text>Extras: {formatCents(extrasTotal)}</Text>
+          <Text style={{ fontWeight: '800', marginTop: 8 }}>
+            Total final: {formatCents(finalTotal)}
+          </Text>
+        </View>
 
         {/* Botón confirmar */}
         <Pressable
@@ -472,16 +496,12 @@ export default function CheckoutScreen() {
             paddingVertical: 14,
             borderRadius: 14,
             alignItems: 'center',
-            opacity: saving ? 0.6 : 1,
+            opacity: saving ? 0.7 : 1,
           }}
         >
-          {saving ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={{ color: '#fff', fontSize: 18, fontWeight: '600' }}>
-              Confirmar reserva
-            </Text>
-          )}
+          <Text style={{ color: '#fff', fontWeight: '800', fontSize: 16 }}>
+            {saving ? 'Procesando…' : 'Confirmar reserva'}
+          </Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
