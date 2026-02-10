@@ -35,20 +35,16 @@ const AuthContext = createContext<AuthContextValue>({
 
 async function ensureUserProfile(userId: string) {
   try {
-    // upsert atómico para evitar “duplicate key” en carreras
-    const { error } = await supabase.from('user_profiles').upsert(
-      {
-        user_id: userId,
-        full_name: 'Sin nombre',
-        phone: '',
-        dni: '',
-        license_plate: '',
-        preferred_locale: 'es',
-        accepted_terms_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id' },
-    );
-    if (error) console.warn('[ensureUserProfile] upsert error', error);
+    const { error } = await supabase.from('user_profiles').insert({
+      user_id: userId,
+      preferred_locale: 'es',
+      accepted_terms_at: new Date().toISOString(),
+    });
+
+    // 23505 = unique_violation en Postgres
+    if (error && (error as any).code !== '23505') {
+      console.warn('[ensureUserProfile] insert error', error);
+    }
   } catch (e) {
     console.warn('[ensureUserProfile] fatal', e);
   }

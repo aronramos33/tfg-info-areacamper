@@ -8,12 +8,17 @@ import {
   StyleSheet,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import dayjs from 'dayjs';
 import { supabase } from '@/lib/supabase';
 
 type Reservation = {
   id: number;
+  user_id: string;
   start_date: string;
   end_date: string;
   payment_status: string | null;
@@ -28,17 +33,28 @@ function formatEuro(cents?: number | null) {
   return `${(v / 100).toFixed(2)} €`;
 }
 
+function formatRange(start: string, end: string) {
+  const s = dayjs(start).format('DD/MM/YYYY');
+  const e = dayjs(end).format('DD/MM/YYYY');
+  return `${s} → ${e}`;
+}
+
 export default function QrScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ reservation_id?: string }>();
+
   const [loading, setLoading] = useState(true);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(
     params.reservation_id ? Number(params.reservation_id) : null,
   );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [showPast, setShowPast] = useState(false);
 
-  // Cargar reservas del usuario actual
+  // “ahora” estable (para evitar warnings/hooks)
+  const now = useMemo(() => dayjs(), []);
+
   useEffect(() => {
     let alive = true;
 
@@ -48,6 +64,7 @@ export default function QrScreen() {
 
       const { data: sessionData } = await supabase.auth.getSession();
       const userId = sessionData.session?.user?.id;
+
       if (!userId) {
         if (!alive) return;
         setErrorMsg('No hay sesión iniciada.');
@@ -58,7 +75,7 @@ export default function QrScreen() {
       const { data, error } = await supabase
         .from('reservations')
         .select(
-          'id,start_date,end_date,payment_status,total_amount_cents,access_code,access_expires_at,created_at',
+          'id,user_id,start_date,end_date,payment_status,total_amount_cents,access_code,access_expires_at,created_at',
         )
         .eq('user_id', userId)
         .order('start_date', { ascending: true });
@@ -75,22 +92,25 @@ export default function QrScreen() {
       const rows = (data ?? []) as Reservation[];
       setReservations(rows);
 
-      // Si no hay seleccionada, selecciona la "más relevante":
-      // 1) activa (hoy entre start/end)
-      // 2) la próxima futura
-      // 3) la última pasada
+      // Selección por defecto:
+      // 1) activa (ahora entre start/end)
+      // 2) próxima
+      // 3) última pasada
       if (!selectedId && rows.length > 0) {
-        const now = dayjs();
-        const active = rows.find(
-          (r) =>
-            now.isAfter(dayjs(r.start_date)) &&
-            now.isBefore(dayjs(r.end_date).add(1, 'day')),
-        );
+        const active = rows.find((r) => {
+          const s = dayjs(r.start_date);
+          const e = dayjs(r.end_date).endOf('day');
+          return now.isAfter(s) && now.isBefore(e);
+        });
+
         const upcoming = rows.find((r) => dayjs(r.start_date).isAfter(now));
         const past = [...rows]
           .reverse()
-          .find((r) => dayjs(r.end_date).isBefore(now));
-        setSelectedId((active ?? upcoming ?? past)?.id ?? rows[0].id);
+          .find((r) => dayjs(r.end_date).endOf('day').isBefore(now));
+
+        setSelectedId(
+          (active ?? upcoming ?? past ?? rows[0])?.id ?? rows[0].id,
+        );
       }
 
       setLoading(false);
@@ -100,9 +120,9 @@ export default function QrScreen() {
     return () => {
       alive = false;
     };
-  }, [selectedId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Actualiza selectedId si llega por params
   useEffect(() => {
     if (params.reservation_id) setSelectedId(Number(params.reservation_id));
   }, [params.reservation_id]);
@@ -112,214 +132,261 @@ export default function QrScreen() {
     [reservations, selectedId],
   );
 
-  const now = useMemo(() => dayjs(), []);
+  const { active, upcoming, past } = useMemo(() => {
+    const active: Reservation[] = [];
+    const upcoming: Reservation[] = [];
+    const past: Reservation[] = [];
 
-  const availability = useMemo(() => {
-    if (!selected) return { canShow: false, reason: 'Selecciona una reserva.' };
+    for (const r of reservations) {
+      const s = dayjs(r.start_date);
+      const e = dayjs(r.end_date).endOf('day');
+
+      const isInDateWindow = dayjs().isAfter(s) && dayjs().isBefore(e);
+      const isPast = e.isBefore(dayjs());
+      const isFuture = s.isAfter(dayjs());
+      const isPaid = r.payment_status === 'paid';
+
+      if (isPast) {
+        past.push(r);
+        continue;
+      }
+
+      // ✅ Activas SOLO si está en fechas Y pagada
+      if (isInDateWindow && isPaid) {
+        active.push(r);
+        continue;
+      }
+
+      // ✅ Todo lo demás que no sea pasado va a próximas:
+      // - futuras
+      // - en fechas pero no pagadas
+      // - (y cualquier borde raro)
+      if (isFuture || isInDateWindow || true) {
+        upcoming.push(r);
+      }
+    }
+
+    upcoming.sort(
+      (a, b) => dayjs(a.start_date).valueOf() - dayjs(b.start_date).valueOf(),
+    );
+    active.sort(
+      (a, b) => dayjs(a.start_date).valueOf() - dayjs(b.start_date).valueOf(),
+    );
+    past.sort(
+      (a, b) => dayjs(b.start_date).valueOf() - dayjs(a.start_date).valueOf(),
+    );
+
+    return { active, upcoming, past };
+  }, [reservations]);
+
+  const qrAvailability = useMemo(() => {
+    if (!selected)
+      return { canShow: false, message: 'Selecciona una reserva.' };
 
     if (selected.payment_status !== 'paid') {
       return {
         canShow: false,
-        reason: 'El QR estará disponible cuando el pago esté confirmado.',
+        message: 'El QR estará disponible cuando el pago esté confirmado.',
       };
     }
 
     if (!selected.access_code) {
       return {
         canShow: false,
-        reason: 'Aún no se ha generado el código de acceso.',
+        message: 'Aún no se ha generado el código de acceso.',
       };
     }
 
     const start = dayjs(selected.start_date);
-    const end = dayjs(selected.end_date);
+    const end = dayjs(selected.end_date).endOf('day');
 
-    // Ventana: 2h antes del inicio hasta final de estancia (o access_expires_at si existe)
+    // Ventana: desde 2h antes del inicio hasta fin de estancia (o access_expires_at si existe)
     const windowStart = start.subtract(2, 'hour');
     const windowEnd = selected.access_expires_at
       ? dayjs(selected.access_expires_at)
-      : end.add(1, 'day');
+      : end;
 
-    if (now.isBefore(windowStart)) {
+    if (dayjs().isBefore(windowStart)) {
       return {
         canShow: false,
-        reason: `El QR estará disponible a partir de ${windowStart.format('DD/MM/YYYY HH:mm')}.`,
+        message: `El QR estará disponible a partir de ${windowStart.format('DD/MM/YYYY HH:mm')}.`,
       };
     }
-
-    if (now.isAfter(windowEnd)) {
-      return {
-        canShow: false,
-        reason: 'Este QR ya no está disponible (reserva finalizada).',
-      };
+    if (dayjs().isAfter(windowEnd)) {
+      return { canShow: false, message: 'Este QR ya no está disponible.' };
     }
 
-    return { canShow: true, reason: '' };
-  }, [selected, now]);
+    return { canShow: true, message: '' };
+  }, [selected]);
 
   const qrValue = useMemo(() => {
     if (!selected?.access_code) return '';
-    // payload simple; si luego quieres, lo firmamos o lo hacemos JWT desde backend
     return JSON.stringify({
       reservation_id: selected.id,
       access_code: selected.access_code,
     });
   }, [selected]);
 
-  const { upcoming, past } = useMemo(() => {
-    const upcoming = reservations.filter((r) =>
-      dayjs(r.end_date).isAfter(now.subtract(1, 'day')),
+  const ReservationItem = ({ r }: { r: Reservation }) => {
+    const isSelected = r.id === selectedId;
+    return (
+      <Pressable
+        onPress={() => setSelectedId(r.id)}
+        style={[styles.item, isSelected && styles.itemActive]}
+      >
+        <Text style={styles.itemTitle}>
+          {formatRange(r.start_date, r.end_date)}
+        </Text>
+        <Text style={styles.itemSub}>{formatEuro(r.total_amount_cents)}</Text>
+      </Pressable>
     );
-    const past = reservations.filter((r) =>
-      dayjs(r.end_date).isBefore(now.subtract(1, 'day')),
-    );
-    // upcoming orden asc, past desc
-    upcoming.sort(
-      (a, b) => dayjs(a.start_date).valueOf() - dayjs(b.start_date).valueOf(),
-    );
-    past.sort(
-      (a, b) => dayjs(b.start_date).valueOf() - dayjs(a.start_date).valueOf(),
-    );
-    return { upcoming, past };
-  }, [reservations, now]);
+  };
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator />
-        <Text style={styles.subtle}>Cargando reservas…</Text>
-      </View>
+      <SafeAreaView style={[styles.safe, { paddingTop: insets.top }]}>
+        <View style={styles.center}>
+          <ActivityIndicator />
+          <Text style={styles.subtle}>Cargando…</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   if (errorMsg) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.title}>QR</Text>
-        <Text style={{ marginTop: 8 }}>{errorMsg}</Text>
+      <SafeAreaView style={[styles.safe, { paddingTop: insets.top }]}>
+        <View style={styles.center}>
+          <Text style={styles.title}>Acceso</Text>
+          <Text style={[styles.subtle, { marginTop: 10 }]}>{errorMsg}</Text>
+
+          <Pressable
+            style={styles.linkBtn}
+            onPress={() => router.replace('/(main)/reservations')}
+          >
+            <Text style={styles.linkText}>Volver a Reservas</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={[styles.safe]}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.container,
+          { paddingBottom: insets.bottom + 24 },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={styles.title}>Acceso</Text>
+
+        {/* Tarjeta QR */}
+        <View style={styles.card}>
+          {!selected ? (
+            <Text style={styles.subtle}>No hay reservas.</Text>
+          ) : (
+            <>
+              <Text style={styles.cardTitle}>
+                {formatRange(selected.start_date, selected.end_date)}
+              </Text>
+              <Text style={styles.cardSub}>
+                Total: {formatEuro(selected.total_amount_cents)}
+              </Text>
+
+              <View style={{ marginTop: 14, alignItems: 'center' }}>
+                {qrAvailability.canShow ? (
+                  <>
+                    <QRCode value={qrValue} size={220} />
+                    <Text
+                      style={[
+                        styles.subtle,
+                        { marginTop: 10, textAlign: 'center' },
+                      ]}
+                    >
+                      Muestra este QR en el acceso.
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.qrPlaceholder}>
+                      <Text style={styles.qrPlaceholderText}>
+                        QR no disponible
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.subtle,
+                        { marginTop: 10, textAlign: 'center' },
+                      ]}
+                    >
+                      {qrAvailability.message}
+                    </Text>
+                  </>
+                )}
+              </View>
+            </>
+          )}
+        </View>
+
+        {/* Activas */}
+        <Text style={styles.section}>Activas</Text>
+        <View style={styles.listCard}>
+          {active.length === 0 ? (
+            <Text style={styles.subtle}>No tienes reservas activas.</Text>
+          ) : (
+            active.map((r) => <ReservationItem key={r.id} r={r} />)
+          )}
+        </View>
+
+        {/* Próximas */}
+        <Text style={styles.section}>Próximas</Text>
+        <View style={styles.listCard}>
+          {upcoming.length === 0 ? (
+            <Text style={styles.subtle}>No tienes reservas próximas.</Text>
+          ) : (
+            upcoming.map((r) => <ReservationItem key={r.id} r={r} />)
+          )}
+        </View>
+
+        {/* Anteriores (desplegable) */}
+        <Pressable
+          style={[styles.sectionRow, { marginTop: 18 }]}
+          onPress={() => setShowPast((v) => !v)}
+        >
+          <Text style={styles.section}>Anteriores</Text>
+          <Text style={styles.sectionToggle}>
+            {showPast ? 'Ocultar' : 'Mostrar'}
+          </Text>
+        </Pressable>
+
+        {showPast ? (
+          <View style={styles.listCard}>
+            {past.length === 0 ? (
+              <Text style={styles.subtle}>
+                Aún no tienes reservas anteriores.
+              </Text>
+            ) : (
+              past.map((r) => <ReservationItem key={r.id} r={r} />)
+            )}
+          </View>
+        ) : null}
+
         <Pressable
           style={styles.linkBtn}
           onPress={() => router.replace('/(main)/reservations')}
         >
           <Text style={styles.linkText}>Volver a Reservas</Text>
         </Pressable>
-      </View>
-    );
-  }
-
-  return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Tu acceso</Text>
-
-      {/* Tarjeta QR */}
-      <View style={styles.card}>
-        {!selected ? (
-          <Text style={styles.subtle}>No hay reserva seleccionada.</Text>
-        ) : (
-          <>
-            <Text style={styles.h2}>Reserva #{selected.id}</Text>
-            <Text style={styles.subtle}>
-              {dayjs(selected.start_date).format('DD/MM/YYYY')} →{' '}
-              {dayjs(selected.end_date).format('DD/MM/YYYY')}
-            </Text>
-            <Text style={[styles.subtle, { marginTop: 6 }]}>
-              Total: {formatEuro(selected.total_amount_cents)}
-            </Text>
-
-            <View style={{ marginTop: 16, alignItems: 'center' }}>
-              {availability.canShow ? (
-                <>
-                  <QRCode value={qrValue} size={220} />
-                  <Text style={[styles.subtle, { marginTop: 10 }]}>
-                    Muestra este QR en el acceso.
-                  </Text>
-                </>
-              ) : (
-                <>
-                  <View style={styles.qrPlaceholder}>
-                    <Text style={styles.qrPlaceholderText}>
-                      QR no disponible
-                    </Text>
-                  </View>
-                  <Text
-                    style={[
-                      styles.subtle,
-                      { marginTop: 10, textAlign: 'center' },
-                    ]}
-                  >
-                    {availability.reason}
-                  </Text>
-                </>
-              )}
-            </View>
-          </>
-        )}
-      </View>
-
-      {/* Próximas / activas */}
-      <Text style={styles.section}>Activas y próximas</Text>
-      <View style={styles.listCard}>
-        {upcoming.length === 0 ? (
-          <Text style={styles.subtle}>
-            No tienes reservas activas o próximas.
-          </Text>
-        ) : (
-          upcoming.map((r) => (
-            <Pressable
-              key={r.id}
-              onPress={() => setSelectedId(r.id)}
-              style={[styles.item, selectedId === r.id && styles.itemActive]}
-            >
-              <Text style={styles.itemTitle}>
-                #{r.id} · {dayjs(r.start_date).format('DD/MM')} →{' '}
-                {dayjs(r.end_date).format('DD/MM')}
-              </Text>
-              <Text style={styles.subtle}>
-                Estado: {r.payment_status ?? '—'} ·{' '}
-                {formatEuro(r.total_amount_cents)}
-              </Text>
-            </Pressable>
-          ))
-        )}
-      </View>
-
-      {/* Pasadas */}
-      <Text style={styles.section}>Anteriores</Text>
-      <View style={styles.listCard}>
-        {past.length === 0 ? (
-          <Text style={styles.subtle}>Aún no tienes reservas anteriores.</Text>
-        ) : (
-          past.map((r) => (
-            <Pressable
-              key={r.id}
-              onPress={() => setSelectedId(r.id)}
-              style={[styles.item, selectedId === r.id && styles.itemActive]}
-            >
-              <Text style={styles.itemTitle}>
-                #{r.id} · {dayjs(r.start_date).format('DD/MM')} →{' '}
-                {dayjs(r.end_date).format('DD/MM')}
-              </Text>
-              <Text style={styles.subtle}>
-                Estado: {r.payment_status ?? '—'} ·{' '}
-                {formatEuro(r.total_amount_cents)}
-              </Text>
-            </Pressable>
-          ))
-        )}
-      </View>
-
-      <Pressable
-        style={styles.linkBtn}
-        onPress={() => router.replace('/(main)/reservations')}
-      >
-        <Text style={styles.linkText}>Volver a Reservas</Text>
-      </Pressable>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 18, paddingBottom: 40, backgroundColor: '#F7F8FB' },
+  safe: { flex: 1, backgroundColor: '#F7F8FB' },
+  container: { padding: 18 },
   center: {
     flex: 1,
     justifyContent: 'center',
@@ -332,24 +399,38 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     textAlign: 'center',
   },
-  h2: { fontSize: 18, fontWeight: '800' },
+
   subtle: { color: '#666', marginTop: 4 },
+
   card: {
     backgroundColor: 'white',
     borderRadius: 16,
     padding: 16,
     elevation: 2,
   },
+  cardTitle: { fontSize: 16, fontWeight: '800' },
+  cardSub: { marginTop: 6, color: '#666' },
+
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+  },
   section: { marginTop: 18, marginBottom: 10, fontSize: 16, fontWeight: '800' },
+  sectionToggle: { color: '#007AFF', fontWeight: '800' },
+
   listCard: {
     backgroundColor: 'white',
     borderRadius: 16,
     padding: 8,
     elevation: 1,
   },
-  item: { padding: 12, borderRadius: 12 },
+
+  item: { paddingVertical: 12, paddingHorizontal: 12, borderRadius: 12 },
   itemActive: { backgroundColor: '#EEF4FF' },
-  itemTitle: { fontWeight: '700' },
+  itemTitle: { fontWeight: '800' },
+  itemSub: { color: '#666', marginTop: 4 },
+
   qrPlaceholder: {
     width: 220,
     height: 220,
@@ -360,7 +441,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  qrPlaceholderText: { color: '#777', fontWeight: '700' },
+  qrPlaceholderText: { color: '#777', fontWeight: '800' },
+
   linkBtn: { marginTop: 18, alignItems: 'center', paddingVertical: 12 },
   linkText: { color: '#007AFF', fontWeight: '800', fontSize: 16 },
 });
