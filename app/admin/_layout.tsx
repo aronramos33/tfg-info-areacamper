@@ -1,23 +1,29 @@
-import { Tabs } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons'; // ejemplo
+import { Tabs, Redirect } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { ActivityIndicator, View } from 'react-native';
 import { useAuth } from '../../providers/AuthProvider';
-import { Redirect } from 'expo-router';
 
-export default function MainTabs() {
-  const { isOwner } = useAuth();
+export default function AdminTabsLayout() {
+  const { session, loading, ownerLoading } = useAuth();
+
+  // Espera a que auth/rol estén listos
+  if (loading || (session && ownerLoading)) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
 
   // Si no hay sesión => fuera
-  if (isOwner) {
-    return <Redirect href="/admin/qr" />;
+  if (!session) {
+    return <Redirect href="/(main)/qr" />;
   }
 
   // ✅ Si es admin, renderiza tabs admin
   return (
     <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: '#007AFF',
-      }}
+      screenOptions={{ headerShown: false, tabBarActiveTintColor: '#007AFF' }}
     >
       <Tabs.Screen
         name="services"
@@ -30,9 +36,9 @@ export default function MainTabs() {
       />
 
       <Tabs.Screen
-        name="reservations/index"
+        name="places/index"
         options={{
-          title: 'Reservar',
+          title: 'Estado',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="calendar-outline" size={size} color={color} />
           ),

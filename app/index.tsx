@@ -1,36 +1,43 @@
-// app/index.tsx
-import { useEffect } from 'react';
-import { ActivityIndicator, Linking, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { ActivityIndicator, View } from 'react-native';
+import { Redirect } from 'expo-router';
 import { useAuth } from '../providers/AuthProvider';
 
 export default function Gate() {
-  const { session, loading, isOwner } = useAuth(); //Se obtiene la sesión y el estado de carga del contexto a través del hook useAuth.
-  const router = useRouter(); //Se obtiene el router para redirigir al usuario a las diferentes rutas.
+  const { session, loading, ownerLoading, isOwner } = useAuth();
+  console.log('GATE RENDER');
+  console.log('GATE STATE', {
+    loading,
+    hasSession: !!session,
+    ownerLoading,
+    isOwner,
+    uid: session?.user?.id,
+  });
 
-  useEffect(() => {
-    if (loading) return; // espera a que AuthProvider cargue
-    // Si loading ya terminó, chequeamos session
-    if (session && isOwner) {
-      router.replace('/(admin)/qr');
-    } else if (session) {
-      router.replace('/(main)/qr');
-    } else {
-      router.replace('/(main)/services');
-    }
-  }, [loading, session, isOwner, router]);
+  // 1) Espera a cargar auth
+  if (loading) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
 
-  useEffect(() => {
-    const sub = Linking.addEventListener('url', (e) => {
-      console.log('Deep link recibido =>', e.url);
-    });
-    return () => sub.remove();
-  }, []);
+  // 2) Si hay sesión, espera a resolver el rol SIEMPRE
+  if (session && ownerLoading) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
 
-  // Pantalla neutra mientras decide
-  return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-      <ActivityIndicator />
-    </View>
+  // 3) Sin sesión => auth
+  if (!session) return <Redirect href="/(main)/qr" />;
+
+  // 4) Con sesión => decide por rol
+  return isOwner ? (
+    <Redirect href="/admin/qr" />
+  ) : (
+    <Redirect href="/(main)/qr" />
   );
-} //Este componente es el que se encarga de redirigir al usuario a las diferentes rutas, dependiendo de si esta logueado o no.
+}

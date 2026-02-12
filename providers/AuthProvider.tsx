@@ -15,23 +15,23 @@ type UserProfile = {
 
 interface AuthContextValue {
   session: Session | null;
-  loading: boolean;
+  loading: boolean; // loading de auth (sesión)
+  ownerLoading: boolean; // loading del rol (owners)
   signOut: () => Promise<void>;
-  // 👇 nuevo:
   profile: UserProfile;
   isOwner: boolean;
   refreshProfile: () => Promise<void>;
-} //Define que datos y funciones se van a usar en el contexto
+}
 
 const AuthContext = createContext<AuthContextValue>({
   session: null,
   loading: true,
+  ownerLoading: true,
   signOut: async () => {},
-  // 👇 nuevo:
   profile: null,
   isOwner: false,
   refreshProfile: async () => {},
-}); //Define el valor por defecto del contexto definido anteriormente
+});
 
 async function ensureUserProfile(userId: string) {
   try {
@@ -41,7 +41,7 @@ async function ensureUserProfile(userId: string) {
       accepted_terms_at: new Date().toISOString(),
     });
 
-    // 23505 = unique_violation en Postgres
+    // 23505 = unique_violation
     if (error && (error as any).code !== '23505') {
       console.warn('[ensureUserProfile] insert error', error);
     }
@@ -53,97 +53,125 @@ async function ensureUserProfile(userId: string) {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [session, setSession] = useState<Session | null>(null); //Estado para la sesión
-  const [loading, setLoading] = useState(true); //Estado para el loading
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [ownerLoading, setOwnerLoading] = useState(true);
+
   const [profile, setProfile] = useState<UserProfile>(null);
   const [isOwner, setIsOwner] = useState(false);
 
-  // loader del perfil
   const loadProfile = async (userId: string) => {
     const { data, error } = await supabase
       .from('user_profiles')
       .select('*')
       .eq('user_id', userId)
       .maybeSingle();
-    if (error) {
-      console.warn('[loadProfile]', error);
-    }
+
+    if (error) console.warn('[loadProfile]', error);
     setProfile(data ?? null);
   };
 
-  // loader del flag owner (lee la tabla owners)
   const loadIsOwner = async (userId: string) => {
     const { data, error } = await supabase
       .from('owners')
       .select('user_id')
       .eq('user_id', userId)
       .maybeSingle();
+
+    // PGRST116 = maybeSingle sin filas
     if (error && error.code !== 'PGRST116') {
-      // PGRST116 = maybeSingle sin filas
       console.warn('[loadIsOwner]', error);
     }
+
     setIsOwner(!!data);
+    setOwnerLoading(false);
   };
 
   const refreshProfile = async () => {
     const uid = session?.user?.id;
-    if (uid) {
-      await Promise.all([loadProfile(uid), loadIsOwner(uid)]);
-    }
+    if (!uid) return;
+
+    // Bloquea mientras refrescas el rol
+    setOwnerLoading(true);
+    await Promise.all([loadProfile(uid), loadIsOwner(uid)]);
   };
+
+  console.log('[loadIsOwner] uid', profile?.user_id);
 
   useEffect(() => {
     let mounted = true;
-    // Cargar sesión al inicio
+
+    const handleSession = (sess: Session | null) => {
+      setSession(sess);
+
+      const uid = sess?.user?.id;
+
+      if (uid) {
+        // ✅ IMPORTANTÍSIMO: en cuanto hay sesión, marcamos ownerLoading=true
+        // para que el Gate NO decida todavía.
+        setOwnerLoading(true);
+
+        // opcional pero ayuda a evitar estado viejo en transiciones
+        setIsOwner(false);
+
+        console.log('[handleSession]', {
+          event: 'setSession',
+          hasUid: !!uid,
+          uid,
+        });
+
+        void ensureUserProfile(uid);
+        void Promise.all([loadProfile(uid), loadIsOwner(uid)]);
+      } else {
+        setProfile(null);
+        setIsOwner(false);
+        setOwnerLoading(false);
+      }
+    };
+
+    // 1) Sesión inicial
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
-      setSession(data.session ?? null); // ✅ primero fijamos sesión
-
-      const uid = data.session?.user?.id;
-      if (uid) {
-        // 2) aseguramos perfil (no bloquea)
-        void ensureUserProfile(uid);
-        // 3) cargamos perfil + owner (no bloquea)
-        void Promise.all([loadProfile(uid), loadIsOwner(uid)]);
-      } // ✅ luego, fire-and-forget (sin await)
-
+      handleSession(data.session ?? null);
       setLoading(false);
-    }); //Sirve para saber si el usuario esta logueado o no
+    });
 
-    // Suscribirse a cambios de auth
-    const { data: sub } = supabase.auth.onAuthStateChange(
-      async (_event, sess) => {
-        setSession(sess ?? null); // ✅ primero sesión
-
-        const uid = sess?.user?.id;
-        if (uid) {
-          void ensureUserProfile(uid);
-          void Promise.all([loadProfile(uid), loadIsOwner(uid)]);
-        } else {
-          setProfile(null);
-          setIsOwner(false);
-        } // ✅ luego perfil (sin bloquear)
-      },
-    ); //Cada vez que el usuario se loguea o desloguea, se actualiza el estado de la sesión
+    // 2) Cambios de auth (login/logout)
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
+      handleSession(sess ?? null);
+    });
 
     return () => {
       mounted = false;
       sub.subscription.unsubscribe();
     };
   }, []);
+  console.log('[loadIsOwner] result', !!profile);
 
   const signOut = async () => {
     await supabase.auth.signOut();
-  }; //Función para cerrar sesión
+    // No hace falta navegar aquí si tienes guard en layouts,
+    // pero no hace daño resetear
+    setProfile(null);
+    setIsOwner(false);
+    setOwnerLoading(false);
+  };
 
   return (
     <AuthContext.Provider
-      value={{ session, loading, signOut, profile, isOwner, refreshProfile }}
+      value={{
+        session,
+        loading,
+        ownerLoading,
+        signOut,
+        profile,
+        isOwner,
+        refreshProfile,
+      }}
     >
       {children}
     </AuthContext.Provider>
-  ); //Retorna el contexto con los datos y funciones definidos anteriormente
+  );
 };
 
-export const useAuth = () => useContext(AuthContext); //Retorna el contexto
-//Lo que hace es que cada vez que se use el hook useAuth, se retorna el contexto con los datos y funciones definidos anteriormente. De tal forma que se puede usar en cualquier componente que este dentro del contexto.
+export const useAuth = () => useContext(AuthContext);
