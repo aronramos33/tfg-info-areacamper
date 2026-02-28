@@ -6,6 +6,7 @@ import {
   ScrollView,
   ActivityIndicator,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -15,6 +16,7 @@ import {
 import QRCode from 'react-native-qrcode-svg';
 import dayjs from 'dayjs';
 import { supabase } from '@/lib/supabase';
+import * as WebBrowser from 'expo-web-browser';
 
 type Reservation = {
   id: number;
@@ -261,6 +263,9 @@ export default function QrScreen() {
 
   const ReservationItem = ({ r }: { r: Reservation }) => {
     const isSelected = r.id === selectedId;
+    const isPending =
+      r.payment_status === 'pending' || r.payment_status === 'unpaid';
+
     return (
       <Pressable
         onPress={() => setSelectedId(r.id)}
@@ -270,6 +275,12 @@ export default function QrScreen() {
           {formatRange(r.start_date, r.end_date)}
         </Text>
         <Text style={styles.itemSub}>{formatEuro(r.total_amount_cents)}</Text>
+
+        {isPending && (
+          <Pressable onPress={() => handlePayNow(r.id)} style={styles.payBtn}>
+            <Text style={styles.payBtnText}>💳 Pagar ahora</Text>
+          </Pressable>
+        )}
       </Pressable>
     );
   };
@@ -302,6 +313,25 @@ export default function QrScreen() {
       </SafeAreaView>
     );
   }
+
+  const handlePayNow = async (reservationId: number) => {
+    try {
+      const { data: fnData, error: fnError } = await supabase.functions.invoke(
+        'create-checkout-session',
+        { body: { reservation_id: reservationId } },
+      );
+
+      if (fnError || !fnData?.url) {
+        Alert.alert('Error', 'No se pudo iniciar el pago. Inténtalo de nuevo.');
+        return;
+      }
+
+      await WebBrowser.openBrowserAsync(fnData.url);
+    } catch (e) {
+      console.warn('[qr] handlePayNow error:', e);
+      Alert.alert('Error', 'Ha ocurrido un problema al iniciar el pago.');
+    }
+  };
 
   return (
     <SafeAreaView style={[styles.safe]}>
@@ -477,4 +507,17 @@ const styles = StyleSheet.create({
 
   linkBtn: { marginTop: 18, alignItems: 'center', paddingVertical: 12 },
   linkText: { color: '#007AFF', fontWeight: '800', fontSize: 16 },
+  payBtn: {
+    marginTop: 8,
+    backgroundColor: '#1A73E8',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  payBtnText: {
+    color: 'white',
+    fontWeight: '700',
+    fontSize: 13,
+  },
 });

@@ -42,7 +42,7 @@ export default function MainTabs() {
       <Tabs.Screen
         name="qr/index"
         options={{
-          title: 'QR',
+          title: 'Mis Viajes',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="qr-code-outline" size={size} color={color} />
           ),
