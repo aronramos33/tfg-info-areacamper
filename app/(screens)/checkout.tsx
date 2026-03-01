@@ -1,4 +1,3 @@
-// app/(flow)/reservation-checkout.tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
@@ -8,37 +7,46 @@ import {
   Alert,
   Pressable,
   TextInput,
-  KeyboardAvoidingView,
   Platform,
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import dayjs from 'dayjs';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
-
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 import RequireAuthCard from '@/components/RequireAuthCard';
 import { nightsBetween } from '@/components/utils/dates';
 import { formatCents, NIGHTLY_CENTS } from '@/components/utils/money';
 
+type UserProfile = {
+  full_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  dni: string | null;
+  license_plate: string | null;
+};
+
 type Extra = {
   id: number;
-  code: 'PET' | 'POWER' | 'PERSON' | string;
+  code: string;
   name_es: string;
   unit_amount_cents: number;
   is_active: boolean;
-  pricing_type: 'per_night' | string;
+  pricing_type: string;
 };
+
+const EXTRA_ORDER: Record<string, number> = { PERSON: 0, PET: 1, POWER: 2 };
 
 export default function CheckoutScreen() {
   const { session } = useAuth();
-
   const { startDate, endDate } = useLocalSearchParams<{
     startDate?: string;
     endDate?: string;
   }>();
 
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [extras, setExtras] = useState<Extra[]>([]);
   const [extraQuantities, setExtraQuantities] = useState<
     Record<number, number>
@@ -46,59 +54,50 @@ export default function CheckoutScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // Campos del perfil editables directamente en checkout
-  const [fullName, setFullName] = useState('');
-  const [dni, setDni] = useState('');
+  // Solo estos dos son editables
   const [phone, setPhone] = useState('');
   const [licensePlate, setLicensePlate] = useState('');
 
   const start = startDate ? dayjs(startDate) : null;
   const end = endDate ? dayjs(endDate) : null;
-
   const nights =
     start && end && end.isAfter(start)
       ? nightsBetween(startDate!, endDate!)
       : 0;
 
   const baseTotal = nights * NIGHTLY_CENTS;
+
   const isToggleExtra = (e: Extra) => e.code === 'POWER';
   const maxUnitsForExtra = (e: Extra) => (isToggleExtra(e) ? 1 : 4);
   const lineTotalCents = (e: Extra, units: number) =>
     units * nights * e.unit_amount_cents;
 
-  const extrasTotal = useMemo(() => {
-    return extras.reduce((sum, e) => {
-      const units = extraQuantities[e.id] ?? 0;
-      return sum + units * nights * e.unit_amount_cents;
-    }, 0);
-  }, [extras, extraQuantities, nights]);
+  const extrasTotal = useMemo(
+    () =>
+      extras.reduce((sum, e) => {
+        const units = extraQuantities[e.id] ?? 0;
+        return sum + units * nights * e.unit_amount_cents;
+      }, 0),
+    [extras, extraQuantities, nights],
+  );
 
   const finalTotal = baseTotal + extrasTotal;
-
-  // ✅ El botón se habilita solo cuando todos los campos están rellenos
-  const profileComplete =
-    fullName.trim().length >= 2 &&
-    dni.trim().length > 0 &&
-    phone.trim().length > 0 &&
-    licensePlate.trim().length > 0;
 
   useEffect(() => {
     if (!session?.user?.id) {
       setLoading(false);
       return;
     }
-
     const loadData = async () => {
       try {
         const { data: profileData } = await supabase
           .from('user_profiles')
-          .select('full_name, phone, dni, license_plate')
+          .select('full_name, first_name, last_name, phone, dni, license_plate')
           .eq('user_id', session.user.id)
-          .maybeSingle();
+          .single();
 
         if (profileData) {
-          setFullName(profileData.full_name ?? '');
-          setDni(profileData.dni ?? '');
+          setProfile(profileData);
           setPhone(profileData.phone ?? '');
           setLicensePlate(profileData.license_plate ?? '');
         }
@@ -111,19 +110,25 @@ export default function CheckoutScreen() {
           .eq('is_active', true)
           .order('id');
 
-        if (extrasData) setExtras(extrasData as Extra[]);
+        if (extrasData) {
+          // Ordenar: Acompañante → Mascota → Electricidad
+          const sorted = [...(extrasData as Extra[])].sort((a, b) => {
+            const oa = EXTRA_ORDER[a.code] ?? 99;
+            const ob = EXTRA_ORDER[b.code] ?? 99;
+            return oa - ob;
+          });
+          setExtras(sorted);
+        }
       } catch (e) {
         console.warn(e);
       } finally {
         setLoading(false);
       }
     };
-
     loadData();
   }, [session?.user?.id]);
 
   if (!session) return <RequireAuthCard />;
-
   if (loading)
     return (
       <SafeAreaView
@@ -132,6 +137,20 @@ export default function CheckoutScreen() {
         <ActivityIndicator />
       </SafeAreaView>
     );
+  if (!profile)
+    return (
+      <SafeAreaView
+        style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
+      >
+        <Text>No se pudo cargar tu perfil.</Text>
+      </SafeAreaView>
+    );
+
+  // Nombre completo: usar full_name si existe, si no construirlo
+  const displayName =
+    profile.full_name?.trim() ||
+    [profile.first_name, profile.last_name].filter(Boolean).join(' ') ||
+    '';
 
   const handleConfirm = async () => {
     if (!start || !end || nights <= 0) {
@@ -139,87 +158,50 @@ export default function CheckoutScreen() {
       return;
     }
 
-    if (!profileComplete) return;
+    const cleanPhone = phone.trim();
+    const cleanPlate = licensePlate.trim();
+
+    if (!displayName) {
+      Alert.alert(
+        'Perfil incompleto',
+        'Añade tu nombre en el perfil antes de reservar.',
+      );
+      return;
+    }
+    if (!profile.dni) {
+      Alert.alert(
+        'Perfil incompleto',
+        'Añade tu DNI en el perfil antes de reservar.',
+      );
+      return;
+    }
+    if (!cleanPhone) {
+      Alert.alert('Teléfono requerido', 'Introduce tu teléfono.');
+      return;
+    }
+    if (!cleanPlate) {
+      Alert.alert('Matrícula requerida', 'Introduce tu matrícula.');
+      return;
+    }
+
+    // Guardar teléfono y matrícula actualizados si han cambiado
+    if (
+      cleanPhone !== (profile.phone ?? '') ||
+      cleanPlate !== (profile.license_plate ?? '')
+    ) {
+      await supabase
+        .from('user_profiles')
+        .update({ phone: cleanPhone, license_plate: cleanPlate })
+        .eq('user_id', session.user.id);
+    }
 
     setSaving(true);
-
     try {
-      // 1) Upsert perfil y esperar confirmación antes de continuar
-      const profilePayload = {
-        user_id: session.user.id,
-        full_name: fullName.trim(),
-        phone: phone.trim(),
-        dni: dni.trim().toUpperCase(),
-        license_plate: licensePlate.trim().toUpperCase(),
-      };
-
-      const { error: profileError } = await supabase
-        .from('user_profiles')
-        .upsert(profilePayload, { onConflict: 'user_id' });
-
-      if (profileError) {
-        console.warn('[checkout] profileError:', profileError);
-        Alert.alert('Error', 'No se pudieron guardar tus datos de perfil.');
-        return; // ← para aquí, no continúa
-      }
-
-      // 2) Solo si el perfil se guardó OK, buscar plaza
-      const { data: placeData, error: placeError } = await supabase.rpc(
-        'get_first_available_place',
-        {
-          p_start_date: startDate,
-          p_end_date: endDate,
-        },
-      );
-
-      if (placeError) {
-        console.warn('[checkout] placeError:', placeError);
-        Alert.alert('Error', 'No se pudo comprobar disponibilidad de plazas.');
-        return;
-      }
-
-      if (!placeData) {
-        Alert.alert(
-          'Sin plazas disponibles',
-          'No hay plazas libres para las fechas seleccionadas. Por favor elige otras fechas.',
-        );
-        return;
-      }
-
-      const assignedPlaceId = placeData as number;
-
-      // 3) Solo si hay plaza, crear reserva
-      const { data: reservation, error: reservationError } = await supabase
-        .from('reservations')
-        .insert({
-          user_id: session.user.id,
-          place_id: assignedPlaceId,
-          start_date: startDate,
-          end_date: endDate,
-          status: 'pending',
-          full_name: fullName.trim(),
-          phone: phone.trim(),
-          dni: dni.trim().toUpperCase(),
-          license_plate: licensePlate.trim().toUpperCase(),
-          nightly_amount_cents: NIGHTLY_CENTS,
-          total_amount_cents: finalTotal,
-        })
-        .select()
-        .single();
-
-      if (reservationError || !reservation) {
-        console.warn('[checkout] reservationError:', reservationError);
-        Alert.alert('Error', 'No se ha podido crear la reserva.');
-        return;
-      }
-
-      // 4) Solo si la reserva existe, insertar extras
-      const extrasToInsert = extras
+      const extrasToSend = extras
         .filter((e) => (extraQuantities[e.id] ?? 0) > 0)
         .map((e) => {
           const units = extraQuantities[e.id] ?? 0;
           return {
-            reservation_id: reservation.id,
             extra_id: e.id,
             quantity: units,
             pricing_type: 'per_night',
@@ -228,297 +210,212 @@ export default function CheckoutScreen() {
           };
         });
 
-      if (extrasToInsert.length > 0) {
-        const { error: extrasErr } = await supabase
-          .from('reservation_extras')
-          .insert(extrasToInsert);
-
-        if (extrasErr) {
-          console.warn('[checkout] extrasErr:', extrasErr);
-          Alert.alert('Error', 'No se han podido guardar los extras.');
-          return;
-        }
-      }
-
-      // 5) Solo si todo lo anterior fue OK, abrir Stripe
       const { data: fnData, error: fnError } = await supabase.functions.invoke(
         'create-checkout-session',
-        { body: { reservation_id: Number(reservation.id) } },
+        {
+          body: {
+            start_date: startDate,
+            end_date: endDate,
+            full_name: displayName,
+            phone: cleanPhone,
+            dni: profile.dni,
+            license_plate: cleanPlate,
+            nightly_amount_cents: NIGHTLY_CENTS,
+            extras: extrasToSend,
+          },
+        },
       );
 
-      if (fnError) {
-        console.warn('[checkout] fnError:', fnError);
-        Alert.alert(
-          'Error',
-          fnError.message ?? 'No se ha podido iniciar el pago.',
-        );
-        return;
-      }
-
-      if (!fnData?.url) {
-        Alert.alert('Error', 'Respuesta inválida al iniciar el pago.');
+      if (fnError || !fnData?.url) {
+        Alert.alert('Error', fnError?.message ?? 'No se pudo iniciar el pago.');
         return;
       }
 
       await WebBrowser.openBrowserAsync(fnData.url);
     } catch (e) {
-      console.warn('[checkout] catch:', e);
-      Alert.alert('Error', 'Ha ocurrido un problema al crear la reserva.');
+      console.warn(e);
+      Alert.alert('Error', 'Ha ocurrido un problema al iniciar el pago.');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FC' }}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: undefined })}
+    <SafeAreaView style={{ flex: 1 }}>
+      <ScrollView
+        contentContainerStyle={{
+          paddingHorizontal: 20,
+          paddingTop: 20,
+          paddingBottom: 32,
+          backgroundColor: '#F8F9FC',
+        }}
       >
-        <ScrollView
-          contentContainerStyle={{
-            paddingHorizontal: 20,
-            paddingTop: 20,
-            paddingBottom: 32,
-          }}
-          keyboardShouldPersistTaps="handled"
-        >
-          <Text
-            style={{
-              fontSize: 28,
-              fontWeight: '700',
-              marginBottom: 20,
-              textAlign: 'center',
-            }}
-          >
-            Resumen de tu reserva
-          </Text>
+        <Text style={styles.pageTitle}>Resumen de tu reserva</Text>
 
-          {/* Estancia */}
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Estancia</Text>
-            <Text>Entrada: {start?.format('DD/MM/YYYY')}</Text>
-            <Text>Salida: {end?.format('DD/MM/YYYY')}</Text>
-            <Text>Noches: {nights}</Text>
-            <Text>Precio por noche: {formatCents(NIGHTLY_CENTS)}</Text>
-            <Text style={{ fontWeight: '700', marginTop: 8 }}>
-              Total base: {formatCents(baseTotal)}
-            </Text>
+        {/* Estancia */}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Estancia</Text>
+          <Row label="Entrada" value={start?.format('DD/MM/YYYY') ?? '—'} />
+          <Row label="Salida" value={end?.format('DD/MM/YYYY') ?? '—'} />
+          <Row label="Noches" value={String(nights)} />
+          <Row label="Precio/noche" value={formatCents(NIGHTLY_CENTS)} />
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Total base</Text>
+            <Text style={styles.totalValue}>{formatCents(baseTotal)}</Text>
           </View>
+        </View>
 
-          {/* Tus datos */}
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Tus datos</Text>
+        {/* Tus datos */}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Tus datos</Text>
 
-            {!profileComplete && (
-              <Text style={styles.profileWarning}>
-                ⚠️ Completa todos los campos para poder confirmar la reserva.
-              </Text>
-            )}
+          {/* Solo lectura */}
+          <Row label="Nombre" value={displayName || '—'} />
+          <Row label="DNI" value={profile.dni ?? '—'} />
 
-            <Text style={styles.fieldLabel}>Nombre completo *</Text>
-            <TextInput
-              value={fullName}
-              onChangeText={setFullName}
-              placeholder="Nombre y apellidos"
-              style={[styles.input, !fullName.trim() && styles.inputError]}
-              autoCapitalize="words"
-            />
+          {/* Editables */}
+          <Text style={styles.fieldLabel}>Teléfono</Text>
+          <TextInput
+            value={phone}
+            onChangeText={setPhone}
+            style={styles.input}
+            placeholder="+34 600 000 000"
+            keyboardType="phone-pad"
+          />
 
-            <Text style={styles.fieldLabel}>DNI / NIE *</Text>
-            <TextInput
-              value={dni}
-              onChangeText={setDni}
-              placeholder="12345678Z"
-              style={[styles.input, !dni.trim() && styles.inputError]}
-              autoCapitalize="characters"
-            />
+          <Text style={styles.fieldLabel}>Matrícula</Text>
+          <TextInput
+            value={licensePlate}
+            onChangeText={setLicensePlate}
+            style={styles.input}
+            placeholder="1234ABC"
+            autoCapitalize="characters"
+          />
+        </View>
 
-            <Text style={styles.fieldLabel}>Teléfono *</Text>
-            <TextInput
-              value={phone}
-              onChangeText={setPhone}
-              placeholder="+34 600 000 000"
-              style={[styles.input, !phone.trim() && styles.inputError]}
-              keyboardType="phone-pad"
-            />
+        {/* Extras */}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Extras adicionales</Text>
+          {extras.map((extra) => {
+            const qty = extraQuantities[extra.id] ?? 0;
+            const isToggle = isToggleExtra(extra);
+            const maxQty = maxUnitsForExtra(extra);
+            const lineTotal = lineTotalCents(extra, qty);
 
-            <Text style={styles.fieldLabel}>Matrícula *</Text>
-            <TextInput
-              value={licensePlate}
-              onChangeText={setLicensePlate}
-              placeholder="1234ABC"
-              style={[styles.input, !licensePlate.trim() && styles.inputError]}
-              autoCapitalize="characters"
-            />
-          </View>
-
-          {/* Extras */}
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Extras adicionales</Text>
-
-            {extras.map((extra) => {
-              const qty = extraQuantities[extra.id] ?? 0;
-              const isToggle = isToggleExtra(extra);
-              const maxQty = maxUnitsForExtra(extra);
-              const lineTotal = lineTotalCents(extra, qty);
-
-              return (
-                <View
-                  key={extra.id}
-                  style={{
-                    flexDirection: 'row',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: 12,
-                  }}
-                >
-                  <View style={{ flex: 1, paddingRight: 12 }}>
-                    <Text style={{ fontSize: 16, fontWeight: '500' }}>
-                      {extra.name_es}
+            return (
+              <View key={extra.id} style={styles.extraRow}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={styles.extraName}>{extra.name_es}</Text>
+                  <Text style={styles.extraPrice}>
+                    {formatCents(extra.unit_amount_cents)} / noche
+                  </Text>
+                  {qty > 0 && (
+                    <Text style={styles.extraDetail}>
+                      {isToggle
+                        ? `Activado × ${nights} noche(s) → ${formatCents(lineTotal)}`
+                        : `${qty} × ${nights} noche(s) → ${formatCents(lineTotal)}`}
                     </Text>
-                    <Text style={{ color: '#555' }}>
-                      {formatCents(extra.unit_amount_cents)} / noche
-                    </Text>
-                    {qty > 0 && (
-                      <Text
-                        style={{ fontSize: 12, color: '#777', marginTop: 2 }}
-                      >
-                        {isToggle
-                          ? `Activado × ${nights} noche(s) → ${formatCents(lineTotal)}`
-                          : `${qty} unidad(es) × ${nights} noche(s) → ${formatCents(lineTotal)}`}
-                      </Text>
-                    )}
-                  </View>
+                  )}
+                </View>
 
-                  {isToggle ? (
+                {isToggle ? (
+                  <Pressable
+                    onPress={() =>
+                      setExtraQuantities((prev) => ({
+                        ...prev,
+                        [extra.id]: prev[extra.id] === 1 ? 0 : 1,
+                      }))
+                    }
+                    style={styles.toggleExtra}
+                  >
+                    <View
+                      style={[
+                        styles.checkbox,
+                        qty === 1 && styles.checkboxActive,
+                      ]}
+                    >
+                      {qty === 1 && <Text style={styles.checkmark}>✓</Text>}
+                    </View>
+                    <Text style={styles.toggleLabel}>
+                      {qty === 1 ? 'Sí' : 'No'}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <View style={styles.stepper}>
                     <Pressable
                       onPress={() =>
                         setExtraQuantities((prev) => ({
                           ...prev,
-                          [extra.id]: prev[extra.id] === 1 ? 0 : 1,
+                          [extra.id]: Math.max(0, (prev[extra.id] ?? 0) - 1),
                         }))
                       }
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 10,
-                        paddingVertical: 8,
-                        paddingHorizontal: 10,
-                        borderRadius: 10,
-                        backgroundColor: '#F2F4F8',
-                      }}
+                      style={styles.stepBtn}
                     >
-                      <View
-                        style={{
-                          width: 22,
-                          height: 22,
-                          borderRadius: 6,
-                          borderWidth: 2,
-                          borderColor: qty === 1 ? '#1A73E8' : '#999',
-                          backgroundColor:
-                            qty === 1 ? '#1A73E8' : 'transparent',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        {qty === 1 && (
-                          <Text
-                            style={{
-                              color: '#fff',
-                              fontSize: 14,
-                              fontWeight: '700',
-                              lineHeight: 16,
-                            }}
-                          >
-                            ✓
-                          </Text>
-                        )}
-                      </View>
-                      <Text style={{ fontWeight: '600' }}>
-                        {qty === 1 ? 'Sí' : 'No'}
-                      </Text>
+                      <Text style={styles.stepBtnText}>−</Text>
                     </Pressable>
-                  ) : (
-                    <View
-                      style={{
-                        flexDirection: 'row',
-                        gap: 8,
-                        alignItems: 'center',
-                      }}
+                    <Text style={styles.stepValue}>{qty}</Text>
+                    <Pressable
+                      onPress={() =>
+                        setExtraQuantities((prev) => ({
+                          ...prev,
+                          [extra.id]: Math.min(
+                            maxQty,
+                            (prev[extra.id] ?? 0) + 1,
+                          ),
+                        }))
+                      }
+                      style={styles.stepBtn}
                     >
-                      <Pressable
-                        onPress={() =>
-                          setExtraQuantities((prev) => ({
-                            ...prev,
-                            [extra.id]: Math.max(0, (prev[extra.id] ?? 0) - 1),
-                          }))
-                        }
-                        style={styles.qtyBtn}
-                      >
-                        <Text style={styles.qtyBtnText}>−</Text>
-                      </Pressable>
-                      <Text style={{ minWidth: 18, textAlign: 'center' }}>
-                        {qty}
-                      </Text>
-                      <Pressable
-                        onPress={() =>
-                          setExtraQuantities((prev) => ({
-                            ...prev,
-                            [extra.id]: Math.min(
-                              maxQty,
-                              (prev[extra.id] ?? 0) + 1,
-                            ),
-                          }))
-                        }
-                        style={styles.qtyBtn}
-                      >
-                        <Text style={styles.qtyBtnText}>+</Text>
-                      </Pressable>
-                    </View>
-                  )}
-                </View>
-              );
-            })}
-          </View>
+                      <Text style={styles.stepBtnText}>+</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+            );
+          })}
+        </View>
 
-          {/* Total */}
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Total</Text>
-            <Text>Base: {formatCents(baseTotal)}</Text>
-            <Text>Extras: {formatCents(extrasTotal)}</Text>
-            <Text style={{ fontWeight: '800', marginTop: 8 }}>
-              Total final: {formatCents(finalTotal)}
-            </Text>
+        {/* Total */}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Total</Text>
+          <Row label="Base" value={formatCents(baseTotal)} />
+          <Row label="Extras" value={formatCents(extrasTotal)} />
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Total final</Text>
+            <Text style={styles.totalValue}>{formatCents(finalTotal)}</Text>
           </View>
+        </View>
 
-          {/* Botón confirmar — deshabilitado si perfil incompleto */}
-          <Pressable
-            onPress={handleConfirm}
-            disabled={saving || !profileComplete}
-            style={{
-              backgroundColor: profileComplete ? '#1A73E8' : '#b0bec5',
-              paddingVertical: 14,
-              borderRadius: 14,
-              alignItems: 'center',
-              opacity: saving ? 0.7 : 1,
-            }}
-          >
-            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 16 }}>
-              {saving
-                ? 'Procesando…'
-                : !profileComplete
-                  ? 'Completa tus datos'
-                  : 'Confirmar reserva'}
-            </Text>
-          </Pressable>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        <Pressable
+          onPress={handleConfirm}
+          disabled={saving}
+          style={[styles.confirmBtn, saving && { opacity: 0.7 }]}
+        >
+          <Text style={styles.confirmBtnText}>
+            {saving ? 'Procesando…' : 'Ir al pago'}
+          </Text>
+        </Pressable>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.row}>
+      <Text style={styles.rowLabel}>{label}</Text>
+      <Text style={styles.rowValue}>{value}</Text>
+    </View>
+  );
+}
+
 const styles = {
+  pageTitle: {
+    fontSize: 26,
+    fontWeight: '700' as const,
+    marginBottom: 20,
+    textAlign: 'center' as const,
+  },
   card: {
     backgroundColor: '#fff',
     padding: 16,
@@ -527,38 +424,85 @@ const styles = {
     elevation: 2,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600' as const,
-    marginBottom: 8,
-  },
-  profileWarning: {
-    color: '#e53935',
-    fontSize: 13,
-    marginBottom: 10,
-    fontWeight: '600' as const,
-  },
-  fieldLabel: {
-    fontSize: 13,
+    fontSize: 17,
     fontWeight: '700' as const,
-    color: '#666',
+    marginBottom: 12,
+  },
+  row: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f5f5f5',
+  },
+  rowLabel: { fontSize: 14, color: '#888' },
+  rowValue: { fontSize: 14, fontWeight: '600' as const, color: '#111' },
+  totalRow: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    paddingTop: 10,
+    marginTop: 4,
+  },
+  totalLabel: { fontSize: 15, fontWeight: '700' as const },
+  totalValue: { fontSize: 15, fontWeight: '800' as const, color: '#111' },
+
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '700' as const,
+    color: '#888',
     marginTop: 12,
     marginBottom: 4,
   },
   input: {
     backgroundColor: '#F7F8FB',
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#e0e0e0',
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: Platform.select({ ios: 12, android: 10 }),
     fontSize: 15,
     color: '#111',
   },
-  inputError: {
-    borderColor: '#ffcdd2',
-    backgroundColor: '#fff8f8',
+
+  extraRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f5f5f5',
   },
-  qtyBtn: {
+  extraName: { fontSize: 15, fontWeight: '600' as const },
+  extraPrice: { fontSize: 13, color: '#888', marginTop: 2 },
+  extraDetail: { fontSize: 12, color: '#007AFF', marginTop: 3 },
+
+  toggleExtra: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: '#F2F4F8',
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#999',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  checkboxActive: { borderColor: '#1A73E8', backgroundColor: '#1A73E8' },
+  checkmark: { color: '#fff', fontSize: 13, fontWeight: '700' as const },
+  toggleLabel: { fontWeight: '600' as const, fontSize: 14 },
+
+  stepper: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+  },
+  stepBtn: {
     width: 34,
     height: 34,
     borderRadius: 10,
@@ -566,8 +510,20 @@ const styles = {
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
   },
-  qtyBtnText: {
-    fontSize: 18,
-    fontWeight: '800' as const,
+  stepBtnText: { fontSize: 18, fontWeight: '800' as const },
+  stepValue: {
+    minWidth: 20,
+    textAlign: 'center' as const,
+    fontSize: 15,
+    fontWeight: '600' as const,
   },
+
+  confirmBtn: {
+    backgroundColor: '#1A73E8',
+    paddingVertical: 15,
+    borderRadius: 14,
+    alignItems: 'center' as const,
+    marginTop: 4,
+  },
+  confirmBtnText: { color: '#fff', fontWeight: '800' as const, fontSize: 16 },
 };

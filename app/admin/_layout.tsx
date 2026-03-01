@@ -44,6 +44,9 @@ export default function AdminTabsLayout() {
           ),
         }}
       />
+      {/* Ocultar del tab bar pero mantener navegable */}
+      <Tabs.Screen name="places/reservas" options={{ href: null }} />
+      <Tabs.Screen name="places/[reservationId]" options={{ href: null }} />
 
       <Tabs.Screen
         name="qr/index"

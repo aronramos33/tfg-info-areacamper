@@ -6,7 +6,6 @@ import {
   ScrollView,
   ActivityIndicator,
   StyleSheet,
-  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -16,7 +15,6 @@ import {
 import QRCode from 'react-native-qrcode-svg';
 import dayjs from 'dayjs';
 import { supabase } from '@/lib/supabase';
-import * as WebBrowser from 'expo-web-browser';
 
 type Reservation = {
   id: number;
@@ -263,8 +261,6 @@ export default function QrScreen() {
 
   const ReservationItem = ({ r }: { r: Reservation }) => {
     const isSelected = r.id === selectedId;
-    const isPending =
-      r.payment_status === 'pending' || r.payment_status === 'unpaid';
 
     return (
       <Pressable
@@ -275,12 +271,6 @@ export default function QrScreen() {
           {formatRange(r.start_date, r.end_date)}
         </Text>
         <Text style={styles.itemSub}>{formatEuro(r.total_amount_cents)}</Text>
-
-        {isPending && (
-          <Pressable onPress={() => handlePayNow(r.id)} style={styles.payBtn}>
-            <Text style={styles.payBtnText}>💳 Pagar ahora</Text>
-          </Pressable>
-        )}
       </Pressable>
     );
   };
@@ -304,34 +294,18 @@ export default function QrScreen() {
           <Text style={[styles.subtle, { marginTop: 10 }]}>{errorMsg}</Text>
 
           <Pressable
-            style={styles.linkBtn}
-            onPress={() => router.replace('/(main)/reservations')}
+            onPress={() => router.push('/search')}
+            style={({ pressed }) => [
+              styles.newReservationBtn,
+              pressed && styles.newReservationBtnPressed,
+            ]}
           >
-            <Text style={styles.linkText}>Volver a Reservas</Text>
+            <Text style={styles.newReservationBtnText}>+ Nueva reserva</Text>
           </Pressable>
         </View>
       </SafeAreaView>
     );
   }
-
-  const handlePayNow = async (reservationId: number) => {
-    try {
-      const { data: fnData, error: fnError } = await supabase.functions.invoke(
-        'create-checkout-session',
-        { body: { reservation_id: reservationId } },
-      );
-
-      if (fnError || !fnData?.url) {
-        Alert.alert('Error', 'No se pudo iniciar el pago. Inténtalo de nuevo.');
-        return;
-      }
-
-      await WebBrowser.openBrowserAsync(fnData.url);
-    } catch (e) {
-      console.warn('[qr] handlePayNow error:', e);
-      Alert.alert('Error', 'Ha ocurrido un problema al iniciar el pago.');
-    }
-  };
 
   return (
     <SafeAreaView style={[styles.safe]}>
@@ -436,10 +410,13 @@ export default function QrScreen() {
         ) : null}
 
         <Pressable
-          style={styles.linkBtn}
-          onPress={() => router.replace('/(main)/reservations')}
+          onPress={() => router.push('/reservations')}
+          style={({ pressed }) => [
+            styles.newReservationBtn,
+            pressed && styles.newReservationBtnPressed,
+          ]}
         >
-          <Text style={styles.linkText}>Volver a Reservas</Text>
+          <Text style={styles.newReservationBtnText}>+ Nueva reserva</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
@@ -519,5 +496,27 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: '700',
     fontSize: 13,
+  },
+  newReservationBtn: {
+    marginTop: 24,
+    backgroundColor: '#007AFF',
+    paddingVertical: 16,
+    paddingHorizontal: 40,
+    borderRadius: 16,
+    alignItems: 'center',
+    shadowColor: '#007AFF',
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  newReservationBtnPressed: {
+    backgroundColor: '#0062CC',
+  },
+  newReservationBtnText: {
+    color: 'white',
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
 });
