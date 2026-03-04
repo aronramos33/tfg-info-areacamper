@@ -48,6 +48,17 @@ export default function AdminTabsLayout() {
       <Tabs.Screen name="places/reservas" options={{ href: null }} />
       <Tabs.Screen name="places/[reservationId]" options={{ href: null }} />
 
+      {/* Mapa — grid plazas interactivo */}
+      <Tabs.Screen
+        name="mapa/index"
+        options={{
+          title: 'Mapa',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="map-outline" size={size} color={color} />
+          ),
+        }}
+      />
+
       <Tabs.Screen
         name="qr/index"
         options={{

@@ -7,12 +7,12 @@ import {
   Alert,
   Pressable,
   TextInput,
-  Platform,
 } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import dayjs from 'dayjs';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
+
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 import RequireAuthCard from '@/components/RequireAuthCard';
@@ -20,43 +20,50 @@ import { nightsBetween } from '@/components/utils/dates';
 import { formatCents, NIGHTLY_CENTS } from '@/components/utils/money';
 
 type UserProfile = {
-  full_name: string | null;
-  first_name: string | null;
-  last_name: string | null;
-  phone: string | null;
-  dni: string | null;
-  license_plate: string | null;
+  full_name: string;
+  phone: string;
+  dni: string;
+  license_plate: string;
 };
 
 type Extra = {
   id: number;
-  code: string;
+  code: 'PET' | 'POWER' | 'PERSON' | string;
   name_es: string;
   unit_amount_cents: number;
   is_active: boolean;
-  pricing_type: string;
+  pricing_type: 'per_night' | string;
 };
 
 const EXTRA_ORDER: Record<string, number> = { PERSON: 0, PET: 1, POWER: 2 };
 
 export default function CheckoutScreen() {
   const { session } = useAuth();
+
   const { startDate, endDate } = useLocalSearchParams<{
     startDate?: string;
     endDate?: string;
   }>();
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
+
+  // ✅ Form editable (phone + plate siempre; name + dni solo si faltan)
+  const [form, setForm] = useState({
+    full_name: '',
+    dni: '',
+    phone: '',
+    license_plate: '',
+  });
+  const setField = (key: keyof typeof form, value: string) =>
+    setForm((p) => ({ ...p, [key]: value }));
+
   const [extras, setExtras] = useState<Extra[]>([]);
   const [extraQuantities, setExtraQuantities] = useState<
     Record<number, number>
   >({});
+  const [numPlaces, setNumPlaces] = useState(1);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-
-  // Solo estos dos son editables
-  const [phone, setPhone] = useState('');
-  const [licensePlate, setLicensePlate] = useState('');
 
   const start = startDate ? dayjs(startDate) : null;
   const end = endDate ? dayjs(endDate) : null;
@@ -65,18 +72,26 @@ export default function CheckoutScreen() {
       ? nightsBetween(startDate!, endDate!)
       : 0;
 
-  const baseTotal = nights * NIGHTLY_CENTS;
+  const baseTotal = nights * NIGHTLY_CENTS * numPlaces;
+  const isToggle = (e: Extra) => e.code === 'POWER';
+  const maxUnits = (e: Extra) => (isToggle(e) ? 1 : 4);
 
-  const isToggleExtra = (e: Extra) => e.code === 'POWER';
-  const maxUnitsForExtra = (e: Extra) => (isToggleExtra(e) ? 1 : 4);
-  const lineTotalCents = (e: Extra, units: number) =>
-    units * nights * e.unit_amount_cents;
+  // Fuera del componente, como función pura (sin dependencias de hooks)
+  function calcLineTotal(
+    units: number,
+    nights: number,
+    unitAmountCents: number,
+  ) {
+    return units * nights * unitAmountCents;
+  }
 
   const extrasTotal = useMemo(
     () =>
       extras.reduce((sum, e) => {
         const units = extraQuantities[e.id] ?? 0;
-        return sum + units * nights * e.unit_amount_cents;
+        const lineTotal = (e: Extra, units: number) =>
+          units * nights * e.unit_amount_cents;
+        return sum + lineTotal(e, units);
       }, 0),
     [extras, extraQuantities, nights],
   );
@@ -88,19 +103,35 @@ export default function CheckoutScreen() {
       setLoading(false);
       return;
     }
+
     const loadData = async () => {
       try {
         const { data: profileData } = await supabase
           .from('user_profiles')
-          .select('full_name, first_name, last_name, phone, dni, license_plate')
+          .select('full_name, phone, dni, license_plate')
           .eq('user_id', session.user.id)
           .single();
 
-        if (profileData) {
-          setProfile(profileData);
-          setPhone(profileData.phone ?? '');
-          setLicensePlate(profileData.license_plate ?? '');
+        // Si full_name está vacío intenta construirlo desde first/last name
+        let fullName = profileData?.full_name ?? '';
+        if (!fullName) {
+          const meta = session.user.user_metadata;
+          const first = (meta?.first_name ?? meta?.given_name ?? '') as string;
+          const last = (meta?.last_name ?? meta?.family_name ?? '') as string;
+          fullName = [first, last].filter(Boolean).join(' ');
         }
+
+        setProfile(
+          profileData ? { ...profileData, full_name: fullName } : null,
+        );
+
+        // ✅ Inicializa el form con lo que haya (o vacío)
+        setForm({
+          full_name: fullName ?? '',
+          dni: profileData?.dni ?? '',
+          phone: profileData?.phone ?? '',
+          license_plate: profileData?.license_plate ?? '',
+        });
 
         const { data: extrasData } = await supabase
           .from('extras')
@@ -111,12 +142,9 @@ export default function CheckoutScreen() {
           .order('id');
 
         if (extrasData) {
-          // Ordenar: Acompañante → Mascota → Electricidad
-          const sorted = [...(extrasData as Extra[])].sort((a, b) => {
-            const oa = EXTRA_ORDER[a.code] ?? 99;
-            const ob = EXTRA_ORDER[b.code] ?? 99;
-            return oa - ob;
-          });
+          const sorted = [...(extrasData as Extra[])].sort(
+            (a, b) => (EXTRA_ORDER[a.code] ?? 9) - (EXTRA_ORDER[b.code] ?? 9),
+          );
           setExtras(sorted);
         }
       } catch (e) {
@@ -125,8 +153,9 @@ export default function CheckoutScreen() {
         setLoading(false);
       }
     };
+
     loadData();
-  }, [session?.user?.id]);
+  }, [session?.user?.id, session?.user?.user_metadata]);
 
   if (!session) return <RequireAuthCard />;
   if (loading)
@@ -146,58 +175,48 @@ export default function CheckoutScreen() {
       </SafeAreaView>
     );
 
-  // Nombre completo: usar full_name si existe, si no construirlo
-  const displayName =
-    profile.full_name?.trim() ||
-    [profile.first_name, profile.last_name].filter(Boolean).join(' ') ||
-    '';
-
   const handleConfirm = async () => {
     if (!start || !end || nights <= 0) {
       Alert.alert('Fechas no válidas', 'Vuelve a seleccionar tus fechas.');
       return;
     }
 
-    const cleanPhone = phone.trim();
-    const cleanPlate = licensePlate.trim();
+    // ✅ Validación según reglas: phone+plate siempre; name+dni solo si faltan en perfil
+    const fullNameToUse = profile.full_name
+      ? profile.full_name
+      : form.full_name.trim();
+    const dniToUse = profile.dni ? profile.dni : form.dni.trim();
+    const phoneToUse = form.phone.trim();
+    const plateToUse = form.license_plate.trim();
 
-    if (!displayName) {
+    if (!fullNameToUse || !dniToUse || !phoneToUse || !plateToUse) {
       Alert.alert(
         'Perfil incompleto',
-        'Añade tu nombre en el perfil antes de reservar.',
+        'Completa tu nombre, DNI, teléfono y matrícula antes de reservar.',
       );
       return;
-    }
-    if (!profile.dni) {
-      Alert.alert(
-        'Perfil incompleto',
-        'Añade tu DNI en el perfil antes de reservar.',
-      );
-      return;
-    }
-    if (!cleanPhone) {
-      Alert.alert('Teléfono requerido', 'Introduce tu teléfono.');
-      return;
-    }
-    if (!cleanPlate) {
-      Alert.alert('Matrícula requerida', 'Introduce tu matrícula.');
-      return;
-    }
-
-    // Guardar teléfono y matrícula actualizados si han cambiado
-    if (
-      cleanPhone !== (profile.phone ?? '') ||
-      cleanPlate !== (profile.license_plate ?? '')
-    ) {
-      await supabase
-        .from('user_profiles')
-        .update({ phone: cleanPhone, license_plate: cleanPlate })
-        .eq('user_id', session.user.id);
     }
 
     setSaving(true);
     try {
-      const extrasToSend = extras
+      // ✅ Persistir cambios en BD antes de pagar
+      const { error: upErr } = await supabase.from('user_profiles').upsert(
+        {
+          user_id: session.user.id,
+          full_name: fullNameToUse,
+          dni: dniToUse,
+          phone: phoneToUse,
+          license_plate: plateToUse,
+        },
+        { onConflict: 'user_id' },
+      );
+
+      if (upErr) {
+        Alert.alert('Error', upErr.message ?? 'No se pudo guardar tu perfil.');
+        return;
+      }
+
+      const extrasPayload = extras
         .filter((e) => (extraQuantities[e.id] ?? 0) > 0)
         .map((e) => {
           const units = extraQuantities[e.id] ?? 0;
@@ -206,7 +225,7 @@ export default function CheckoutScreen() {
             quantity: units,
             pricing_type: 'per_night',
             unit_amount_cents: e.unit_amount_cents,
-            line_total_cents: lineTotalCents(e, units),
+            line_total_cents: calcLineTotal(units, nights, e.unit_amount_cents),
           };
         });
 
@@ -216,25 +235,30 @@ export default function CheckoutScreen() {
           body: {
             start_date: startDate,
             end_date: endDate,
-            full_name: displayName,
-            phone: cleanPhone,
-            dni: profile.dni,
-            license_plate: cleanPlate,
+            num_places: numPlaces,
+            full_name: fullNameToUse,
+            phone: phoneToUse,
+            dni: dniToUse,
+            license_plate: plateToUse,
             nightly_amount_cents: NIGHTLY_CENTS,
-            extras: extrasToSend,
+            extras: extrasPayload,
           },
         },
       );
 
-      if (fnError || !fnData?.url) {
-        Alert.alert('Error', fnError?.message ?? 'No se pudo iniciar el pago.');
+      if (fnError) {
+        Alert.alert('Error', fnError.message ?? 'No se pudo iniciar el pago.');
+        return;
+      }
+      if (!fnData?.url) {
+        Alert.alert('Error', 'Respuesta inválida al iniciar el pago.');
         return;
       }
 
       await WebBrowser.openBrowserAsync(fnData.url);
     } catch (e) {
       console.warn(e);
-      Alert.alert('Error', 'Ha ocurrido un problema al iniciar el pago.');
+      Alert.alert('Error', 'Ha ocurrido un problema al crear la reserva.');
     } finally {
       setSaving(false);
     }
@@ -250,75 +274,147 @@ export default function CheckoutScreen() {
           backgroundColor: '#F8F9FC',
         }}
       >
-        <Text style={styles.pageTitle}>Resumen de tu reserva</Text>
+        <Text
+          style={{
+            fontSize: 28,
+            fontWeight: '700',
+            marginBottom: 20,
+            textAlign: 'center',
+          }}
+        >
+          Resumen de tu reserva
+        </Text>
 
         {/* Estancia */}
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Estancia</Text>
-          <Row label="Entrada" value={start?.format('DD/MM/YYYY') ?? '—'} />
-          <Row label="Salida" value={end?.format('DD/MM/YYYY') ?? '—'} />
-          <Row label="Noches" value={String(nights)} />
-          <Row label="Precio/noche" value={formatCents(NIGHTLY_CENTS)} />
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total base</Text>
-            <Text style={styles.totalValue}>{formatCents(baseTotal)}</Text>
+        <View style={card}>
+          <Text style={sectionTitle}>Estancia</Text>
+          <Text>Entrada: {start?.format('DD/MM/YYYY')}</Text>
+          <Text>Salida: {end?.format('DD/MM/YYYY')}</Text>
+          <Text>Noches: {nights}</Text>
+          <Text>Precio por noche: {formatCents(NIGHTLY_CENTS)}</Text>
+        </View>
+
+        {/* Número de plazas */}
+        <View style={card}>
+          <Text style={sectionTitle}>Número de plazas</Text>
+          <Text style={{ color: '#666', fontSize: 13, marginBottom: 12 }}>
+            {formatCents(NIGHTLY_CENTS)} × {nights} noche
+            {nights !== 1 ? 's' : ''} × plaza
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+            <Pressable
+              onPress={() => setNumPlaces((n) => Math.max(1, n - 1))}
+              style={counterBtn}
+            >
+              <Text style={counterBtnText}>−</Text>
+            </Pressable>
+            <Text
+              style={{
+                fontSize: 26,
+                fontWeight: '800',
+                minWidth: 32,
+                textAlign: 'center',
+              }}
+            >
+              {numPlaces}
+            </Text>
+            <Pressable
+              onPress={() => setNumPlaces((n) => n + 1)}
+              style={counterBtn}
+            >
+              <Text style={counterBtnText}>+</Text>
+            </Pressable>
+            <Text style={{ color: '#666', fontSize: 14 }}>
+              = {formatCents(nights * NIGHTLY_CENTS * numPlaces)}
+            </Text>
           </View>
         </View>
 
         {/* Tus datos */}
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Tus datos</Text>
+        <View style={card}>
+          <Text style={sectionTitle}>Tus datos</Text>
 
-          {/* Solo lectura */}
-          <Row label="Nombre" value={displayName || '—'} />
-          <Row label="DNI" value={profile.dni ?? '—'} />
+          <Text style={{ marginTop: 6, color: '#666' }}>Nombre</Text>
+          {profile.full_name ? (
+            <Text>{profile.full_name || '—'}</Text>
+          ) : (
+            <TextInput
+              value={form.full_name}
+              onChangeText={(t) => setField('full_name', t)}
+              placeholder="Nombre y apellidos"
+              autoCapitalize="words"
+              style={input}
+            />
+          )}
 
-          {/* Editables */}
-          <Text style={styles.fieldLabel}>Teléfono</Text>
+          <Text style={{ marginTop: 12, color: '#666' }}>DNI</Text>
+          {profile.dni ? (
+            <Text>{profile.dni || '—'}</Text>
+          ) : (
+            <TextInput
+              value={form.dni}
+              onChangeText={(t) => setField('dni', t)}
+              placeholder="DNI"
+              autoCapitalize="characters"
+              style={input}
+            />
+          )}
+
+          <Text style={{ marginTop: 12, color: '#666' }}>Teléfono</Text>
           <TextInput
-            value={phone}
-            onChangeText={setPhone}
-            style={styles.input}
-            placeholder="+34 600 000 000"
+            value={form.phone}
+            onChangeText={(t) => setField('phone', t)}
+            placeholder="Teléfono"
             keyboardType="phone-pad"
+            style={input}
           />
 
-          <Text style={styles.fieldLabel}>Matrícula</Text>
+          <Text style={{ marginTop: 12, color: '#666' }}>Matrícula</Text>
           <TextInput
-            value={licensePlate}
-            onChangeText={setLicensePlate}
-            style={styles.input}
-            placeholder="1234ABC"
+            value={form.license_plate}
+            onChangeText={(t) => setField('license_plate', t)}
+            placeholder="Matrícula"
             autoCapitalize="characters"
+            style={input}
           />
         </View>
 
         {/* Extras */}
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Extras adicionales</Text>
+        <View style={card}>
+          <Text style={sectionTitle}>Extras adicionales</Text>
           {extras.map((extra) => {
             const qty = extraQuantities[extra.id] ?? 0;
-            const isToggle = isToggleExtra(extra);
-            const maxQty = maxUnitsForExtra(extra);
-            const lineTotal = lineTotalCents(extra, qty);
+            const toggle = isToggle(extra);
+            const maxQty = maxUnits(extra);
+            const lt = calcLineTotal(qty, nights, extra.unit_amount_cents);
 
             return (
-              <View key={extra.id} style={styles.extraRow}>
+              <View
+                key={extra.id}
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: 12,
+                }}
+              >
                 <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={styles.extraName}>{extra.name_es}</Text>
-                  <Text style={styles.extraPrice}>
+                  <Text style={{ fontSize: 16, fontWeight: '500' }}>
+                    {extra.name_es}
+                  </Text>
+                  <Text style={{ color: '#555' }}>
                     {formatCents(extra.unit_amount_cents)} / noche
                   </Text>
                   {qty > 0 && (
-                    <Text style={styles.extraDetail}>
-                      {isToggle
-                        ? `Activado × ${nights} noche(s) → ${formatCents(lineTotal)}`
-                        : `${qty} × ${nights} noche(s) → ${formatCents(lineTotal)}`}
+                    <Text style={{ fontSize: 12, color: '#777', marginTop: 2 }}>
+                      {toggle
+                        ? `Activado × ${nights} noche(s) → ${formatCents(lt)}`
+                        : `${qty} ud. × ${nights} noche(s) → ${formatCents(lt)}`}
                     </Text>
                   )}
                 </View>
 
-                {isToggle ? (
+                {toggle ? (
                   <Pressable
                     onPress={() =>
                       setExtraQuantities((prev) => ({
@@ -326,22 +422,53 @@ export default function CheckoutScreen() {
                         [extra.id]: prev[extra.id] === 1 ? 0 : 1,
                       }))
                     }
-                    style={styles.toggleExtra}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 10,
+                      paddingVertical: 8,
+                      paddingHorizontal: 10,
+                      borderRadius: 10,
+                      backgroundColor: '#F2F4F8',
+                    }}
                   >
                     <View
-                      style={[
-                        styles.checkbox,
-                        qty === 1 && styles.checkboxActive,
-                      ]}
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: 6,
+                        borderWidth: 2,
+                        borderColor: qty === 1 ? '#1A73E8' : '#999',
+                        backgroundColor: qty === 1 ? '#1A73E8' : 'transparent',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
                     >
-                      {qty === 1 && <Text style={styles.checkmark}>✓</Text>}
+                      {qty === 1 && (
+                        <Text
+                          style={{
+                            color: '#fff',
+                            fontSize: 14,
+                            fontWeight: '700',
+                            lineHeight: 16,
+                          }}
+                        >
+                          ✓
+                        </Text>
+                      )}
                     </View>
-                    <Text style={styles.toggleLabel}>
+                    <Text style={{ fontWeight: '600' }}>
                       {qty === 1 ? 'Sí' : 'No'}
                     </Text>
                   </Pressable>
                 ) : (
-                  <View style={styles.stepper}>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      gap: 8,
+                      alignItems: 'center',
+                    }}
+                  >
                     <Pressable
                       onPress={() =>
                         setExtraQuantities((prev) => ({
@@ -349,11 +476,13 @@ export default function CheckoutScreen() {
                           [extra.id]: Math.max(0, (prev[extra.id] ?? 0) - 1),
                         }))
                       }
-                      style={styles.stepBtn}
+                      style={smallBtn}
                     >
-                      <Text style={styles.stepBtnText}>−</Text>
+                      <Text style={{ fontSize: 18, fontWeight: '800' }}>−</Text>
                     </Pressable>
-                    <Text style={styles.stepValue}>{qty}</Text>
+                    <Text style={{ minWidth: 18, textAlign: 'center' }}>
+                      {qty}
+                    </Text>
                     <Pressable
                       onPress={() =>
                         setExtraQuantities((prev) => ({
@@ -364,9 +493,9 @@ export default function CheckoutScreen() {
                           ),
                         }))
                       }
-                      style={styles.stepBtn}
+                      style={smallBtn}
                     >
-                      <Text style={styles.stepBtnText}>+</Text>
+                      <Text style={{ fontSize: 18, fontWeight: '800' }}>+</Text>
                     </Pressable>
                   </View>
                 )}
@@ -375,24 +504,33 @@ export default function CheckoutScreen() {
           })}
         </View>
 
-        {/* Total */}
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Total</Text>
-          <Row label="Base" value={formatCents(baseTotal)} />
-          <Row label="Extras" value={formatCents(extrasTotal)} />
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total final</Text>
-            <Text style={styles.totalValue}>{formatCents(finalTotal)}</Text>
-          </View>
+        {/* Total final */}
+        <View style={card}>
+          <Text style={sectionTitle}>Total</Text>
+          <Text>
+            Base ({numPlaces} plaza{numPlaces !== 1 ? 's' : ''}):{' '}
+            {formatCents(baseTotal)}
+          </Text>
+          <Text>Extras: {formatCents(extrasTotal)}</Text>
+          <Text style={{ fontWeight: '800', marginTop: 8, fontSize: 16 }}>
+            Total final: {formatCents(finalTotal)}
+          </Text>
         </View>
 
+        {/* Botón confirmar */}
         <Pressable
           onPress={handleConfirm}
           disabled={saving}
-          style={[styles.confirmBtn, saving && { opacity: 0.7 }]}
+          style={{
+            backgroundColor: '#1A73E8',
+            paddingVertical: 14,
+            borderRadius: 14,
+            alignItems: 'center',
+            opacity: saving ? 0.7 : 1,
+          }}
         >
-          <Text style={styles.confirmBtnText}>
-            {saving ? 'Procesando…' : 'Ir al pago'}
+          <Text style={{ color: '#fff', fontWeight: '800', fontSize: 16 }}>
+            {saving ? 'Procesando…' : 'Confirmar reserva'}
           </Text>
         </Pressable>
       </ScrollView>
@@ -400,130 +538,40 @@ export default function CheckoutScreen() {
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue}>{value}</Text>
-    </View>
-  );
-}
-
-const styles = {
-  pageTitle: {
-    fontSize: 26,
-    fontWeight: '700' as const,
-    marginBottom: 20,
-    textAlign: 'center' as const,
-  },
-  card: {
-    backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 16,
-    elevation: 2,
-  },
-  sectionTitle: {
-    fontSize: 17,
-    fontWeight: '700' as const,
-    marginBottom: 12,
-  },
-  row: {
-    flexDirection: 'row' as const,
-    justifyContent: 'space-between' as const,
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f5f5f5',
-  },
-  rowLabel: { fontSize: 14, color: '#888' },
-  rowValue: { fontSize: 14, fontWeight: '600' as const, color: '#111' },
-  totalRow: {
-    flexDirection: 'row' as const,
-    justifyContent: 'space-between' as const,
-    paddingTop: 10,
-    marginTop: 4,
-  },
-  totalLabel: { fontSize: 15, fontWeight: '700' as const },
-  totalValue: { fontSize: 15, fontWeight: '800' as const, color: '#111' },
-
-  fieldLabel: {
-    fontSize: 12,
-    fontWeight: '700' as const,
-    color: '#888',
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  input: {
-    backgroundColor: '#F7F8FB',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: Platform.select({ ios: 12, android: 10 }),
-    fontSize: 15,
-    color: '#111',
-  },
-
-  extraRow: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f5f5f5',
-  },
-  extraName: { fontSize: 15, fontWeight: '600' as const },
-  extraPrice: { fontSize: 13, color: '#888', marginTop: 2 },
-  extraDetail: { fontSize: 12, color: '#007AFF', marginTop: 3 },
-
-  toggleExtra: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    gap: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    backgroundColor: '#F2F4F8',
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#999',
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-  },
-  checkboxActive: { borderColor: '#1A73E8', backgroundColor: '#1A73E8' },
-  checkmark: { color: '#fff', fontSize: 13, fontWeight: '700' as const },
-  toggleLabel: { fontWeight: '600' as const, fontSize: 14 },
-
-  stepper: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    gap: 8,
-  },
-  stepBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: '#F2F4F8',
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-  },
-  stepBtnText: { fontSize: 18, fontWeight: '800' as const },
-  stepValue: {
-    minWidth: 20,
-    textAlign: 'center' as const,
-    fontSize: 15,
-    fontWeight: '600' as const,
-  },
-
-  confirmBtn: {
-    backgroundColor: '#1A73E8',
-    paddingVertical: 15,
-    borderRadius: 14,
-    alignItems: 'center' as const,
-    marginTop: 4,
-  },
-  confirmBtnText: { color: '#fff', fontWeight: '800' as const, fontSize: 16 },
+// Estilos inline
+const card = {
+  backgroundColor: '#fff',
+  padding: 16,
+  borderRadius: 16,
+  marginBottom: 16,
+  elevation: 2,
+};
+const sectionTitle = {
+  fontSize: 18,
+  fontWeight: '600' as const,
+  marginBottom: 8,
+};
+const counterBtn = {
+  width: 40,
+  height: 40,
+  borderRadius: 10,
+  backgroundColor: '#F2F4F8',
+  alignItems: 'center' as const,
+  justifyContent: 'center' as const,
+};
+const counterBtnText = { fontSize: 22, fontWeight: '800' as const };
+const smallBtn = {
+  width: 34,
+  height: 34,
+  borderRadius: 10,
+  backgroundColor: '#F2F4F8',
+  alignItems: 'center' as const,
+  justifyContent: 'center' as const,
+};
+const input = {
+  backgroundColor: '#F2F4F8',
+  borderRadius: 12,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  marginTop: 6,
 };

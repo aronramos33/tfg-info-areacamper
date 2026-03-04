@@ -11,9 +11,9 @@ export default function RequireAuthCard() {
           Inicia sesión o regístrate para acceder a esta sección.
         </Text>
 
-        <Link href="/(auth)/options" asChild>
+        <Link href="/(auth)/sign-in" asChild>
           <TouchableOpacity style={styles.button}>
-            <Text style={styles.buttonText}>Ir a iniciar sesión</Text>
+            <Text style={styles.buttonText}>Iniciar sesión</Text>
           </TouchableOpacity>
         </Link>
       </View>

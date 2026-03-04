@@ -473,16 +473,16 @@ export default function ProfileIndex() {
                   <View style={[styles.rowButtons, { marginTop: 12 }]}>
                     <View style={styles.flex}>
                       <Button
-                        title={saving ? 'Guardando…' : 'Guardar'}
-                        onPress={handleSaveProfile}
+                        title="Cancelar"
+                        onPress={rollbackToSnapshot}
                         disabled={saving}
                       />
                     </View>
                     <View style={{ width: 10 }} />
                     <View style={styles.flex}>
                       <Button
-                        title="Cancelar"
-                        onPress={rollbackToSnapshot}
+                        title={saving ? 'Guardando…' : 'Guardar'}
+                        onPress={handleSaveProfile}
                         disabled={saving}
                       />
                     </View>

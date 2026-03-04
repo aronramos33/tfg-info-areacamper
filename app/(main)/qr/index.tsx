@@ -146,7 +146,6 @@ export default function QrScreen() {
 
       const isInDateWindow = dayjs().isAfter(s) && dayjs().isBefore(e);
       const isPast = e.isBefore(dayjs());
-      const isFuture = s.isAfter(dayjs());
       const isPaid = r.payment_status === 'paid';
 
       if (isPast) {
@@ -161,9 +160,7 @@ export default function QrScreen() {
       }
 
       // ✅ Todo lo demás que no sea pasado va a próximas
-      if (isFuture || isInDateWindow || true) {
-        upcoming.push(r);
-      }
+      upcoming.push(r);
     }
 
     upcoming.sort(
@@ -179,6 +176,10 @@ export default function QrScreen() {
     return { active, upcoming, past };
   }, [reservations]);
 
+  // ✅ NUEVO: si no hay nada en ninguna lista, mostramos estado vacío con CTA
+  const hasAnyReservations =
+    active.length > 0 || upcoming.length > 0 || past.length > 0;
+
   const qrAvailability = useMemo(() => {
     if (!selected)
       return { canShow: false, message: 'Selecciona una reserva.' };
@@ -189,8 +190,6 @@ export default function QrScreen() {
         message: 'El QR estará disponible cuando el pago esté confirmado.',
       };
     }
-
-    // ✅ CAMBIO MÍNIMO: ya no dependemos de access_code para mostrar QR rotativo
 
     const start = dayjs(selected.start_date);
     const end = dayjs(selected.end_date).endOf('day');
@@ -204,7 +203,9 @@ export default function QrScreen() {
     if (dayjs().isBefore(windowStart)) {
       return {
         canShow: false,
-        message: `El QR estará disponible a partir de ${windowStart.format('DD/MM/YYYY HH:mm')}.`,
+        message: `El QR estará disponible a partir de ${windowStart.format(
+          'DD/MM/YYYY HH:mm',
+        )}.`,
       };
     }
     if (dayjs().isAfter(windowEnd)) {
@@ -250,7 +251,7 @@ export default function QrScreen() {
     };
   }, [selected?.id, qrAvailability.canShow]);
 
-  // ✅ CAMBIO: QR ahora usa qr_pass rotativo
+  // ✅ QR ahora usa qr_pass rotativo
   const qrValue = useMemo(() => {
     if (!selected?.id || !qrPass) return '';
     return JSON.stringify({
@@ -307,6 +308,47 @@ export default function QrScreen() {
     );
   }
 
+  // ✅ Estado vacío: no hay reservas en ninguna categoría
+  if (!hasAnyReservations) {
+    return (
+      <SafeAreaView style={[styles.safe]}>
+        <ScrollView
+          contentContainerStyle={[
+            styles.container,
+            { paddingBottom: insets.bottom + 24, flexGrow: 1 },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.title}>Acceso</Text>
+
+          <View style={[styles.card, { marginTop: 8 }]}>
+            <Text style={[styles.cardTitle, { textAlign: 'center' }]}>
+              No tienes reservas actualmente
+            </Text>
+            <Text
+              style={[styles.subtle, { marginTop: 10, textAlign: 'center' }]}
+            >
+              Cuando tengas una reserva activa o próxima, aquí verás tu QR de
+              acceso.
+            </Text>
+          </View>
+
+          <View style={{ flex: 1 }} />
+
+          <Pressable
+            onPress={() => router.push('/reservations')}
+            style={({ pressed }) => [
+              styles.newReservationBtn,
+              pressed && styles.newReservationBtnPressed,
+            ]}
+          >
+            <Text style={styles.newReservationBtnText}>+ Nueva reserva</Text>
+          </Pressable>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={[styles.safe]}>
       <ScrollView
@@ -325,7 +367,7 @@ export default function QrScreen() {
           ) : (
             <>
               <Text style={styles.cardTitle}>
-                {formatRange(selected.start_date, selected.end_date)}
+                Periodo: {formatRange(selected.start_date, selected.end_date)}
               </Text>
               <Text style={styles.cardSub}>
                 Total: {formatEuro(selected.total_amount_cents)}
@@ -366,48 +408,52 @@ export default function QrScreen() {
           )}
         </View>
 
-        {/* Activas */}
-        <Text style={styles.section}>Activas</Text>
-        <View style={styles.listCard}>
-          {active.length === 0 ? (
-            <Text style={styles.subtle}>No tienes reservas activas.</Text>
-          ) : (
-            active.map((r) => <ReservationItem key={r.id} r={r} />)
-          )}
-        </View>
+        {/* Activas (solo si hay) */}
+        {active.length > 0 && (
+          <>
+            <Text style={styles.section}>Activas</Text>
+            <View style={styles.listCard}>
+              {active.map((r) => (
+                <ReservationItem key={r.id} r={r} />
+              ))}
+            </View>
+          </>
+        )}
 
-        {/* Próximas */}
-        <Text style={styles.section}>Próximas</Text>
-        <View style={styles.listCard}>
-          {upcoming.length === 0 ? (
-            <Text style={styles.subtle}>No tienes reservas próximas.</Text>
-          ) : (
-            upcoming.map((r) => <ReservationItem key={r.id} r={r} />)
-          )}
-        </View>
+        {/* Próximas (solo si hay) */}
+        {upcoming.length > 0 && (
+          <>
+            <Text style={styles.section}>Próximas</Text>
+            <View style={styles.listCard}>
+              {upcoming.map((r) => (
+                <ReservationItem key={r.id} r={r} />
+              ))}
+            </View>
+          </>
+        )}
 
-        {/* Anteriores (desplegable) */}
-        <Pressable
-          style={[styles.sectionRow, { marginTop: 18 }]}
-          onPress={() => setShowPast((v) => !v)}
-        >
-          <Text style={styles.section}>Anteriores</Text>
-          <Text style={styles.sectionToggle}>
-            {showPast ? 'Ocultar' : 'Mostrar'}
-          </Text>
-        </Pressable>
-
-        {showPast ? (
-          <View style={styles.listCard}>
-            {past.length === 0 ? (
-              <Text style={styles.subtle}>
-                Aún no tienes reservas anteriores.
+        {/* Anteriores (solo si hay) */}
+        {past.length > 0 && (
+          <>
+            <Pressable
+              style={[styles.sectionRow, { marginTop: 18 }]}
+              onPress={() => setShowPast((v) => !v)}
+            >
+              <Text style={styles.section}>Anteriores</Text>
+              <Text style={styles.sectionToggle}>
+                {showPast ? 'Ocultar' : 'Mostrar'}
               </Text>
-            ) : (
-              past.map((r) => <ReservationItem key={r.id} r={r} />)
-            )}
-          </View>
-        ) : null}
+            </Pressable>
+
+            {showPast ? (
+              <View style={styles.listCard}>
+                {past.map((r) => (
+                  <ReservationItem key={r.id} r={r} />
+                ))}
+              </View>
+            ) : null}
+          </>
+        )}
 
         <Pressable
           onPress={() => router.push('/reservations')}

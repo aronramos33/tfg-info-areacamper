@@ -335,6 +335,9 @@ export default function AdminServiceDetail() {
             {/* Botones guardar/cancelar en modo edición */}
             {isEditing && (
               <View style={styles.editButtons}>
+                <Pressable onPress={handleCancelEdit} style={styles.btnCancel}>
+                  <Text style={styles.btnCancelText}>Cancelar</Text>
+                </Pressable>
                 <Pressable
                   onPress={handleSave}
                   disabled={saving}
@@ -345,9 +348,6 @@ export default function AdminServiceDetail() {
                   ) : (
                     <Text style={styles.btnSaveText}>Guardar cambios</Text>
                   )}
-                </Pressable>
-                <Pressable onPress={handleCancelEdit} style={styles.btnCancel}>
-                  <Text style={styles.btnCancelText}>Cancelar</Text>
                 </Pressable>
               </View>
             )}
