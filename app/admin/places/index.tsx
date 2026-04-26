@@ -10,8 +10,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
 import dayjs from 'dayjs';
 import isoWeek from 'dayjs/plugin/isoWeek';
@@ -28,7 +27,6 @@ type Place = { id: number; name: string; is_active: boolean };
 
 type Reservation = {
   id: number;
-  place_id: number | null;
   place_ids: number[] | null;
   num_places: number | null;
   start_date: string;
@@ -122,7 +120,7 @@ export default function AdminDashboard() {
         supabase
           .from('reservations')
           .select(
-            'id,place_id,place_ids,num_places,start_date,end_date,payment_status,full_name,total_amount_cents,nightly_amount_cents,created_at,user_id',
+            'id,place_ids,num_places,start_date,end_date,payment_status,full_name,total_amount_cents,nightly_amount_cents,created_at,user_id',
           )
           .eq('payment_status', 'paid'),
         supabase.from('owners').select('user_id'),

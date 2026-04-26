@@ -16,7 +16,7 @@ export default function AuthLayout() {
 
   // Si ya está logueado, no tiene sentido verlo aquí → lo sacamos a main
   if (session) {
-    return <Redirect href="/(main)/qr" />;
+    return <Redirect href="/(main)/services" />;
   }
 
   // Si NO hay sesión, puede ver options, sign-in, sign-up sin problema

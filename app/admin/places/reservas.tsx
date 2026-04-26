@@ -9,14 +9,13 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+
 import { supabase } from '../../../lib/supabase';
 import dayjs from 'dayjs';
 
 type Reservation = {
   id: number;
-  place_id: number | null;
   start_date: string;
   end_date: string;
   payment_status: string;
@@ -62,7 +61,7 @@ export default function AdminReservas() {
         const reservationsRes = await supabase
           .from('reservations')
           .select(
-            'id,place_id,start_date,end_date,payment_status,full_name,total_amount_cents,user_id',
+            'id,start_date,end_date,payment_status,full_name,total_amount_cents,user_id',
           )
           .order('start_date', { ascending: false });
 
@@ -225,7 +224,6 @@ export default function AdminReservas() {
                     </Text>
                     <Text style={styles.cardId}>
                       #{r.id}
-                      {r.place_id ? ` · Plaza ${r.place_id}` : ''}
                     </Text>
                   </View>
                   <View style={styles.cardRight}>

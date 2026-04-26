@@ -4,9 +4,11 @@ import { useRouter } from 'expo-router';
 import CalendarRangePaged from '@/components/CalendarRangePaged';
 import { nightsBetween } from '@/components/utils/dates';
 import { formatCents, NIGHTLY_CENTS } from '@/components/utils/money';
+import { useAuth } from '@/providers/AuthProvider';
 
 export default function SearchScreen() {
   const router = useRouter();
+  const { session } = useAuth();
   const [startId, setStartId] = useState<string | undefined>();
   const [endId, setEndId] = useState<string | undefined>();
 
@@ -38,12 +40,16 @@ export default function SearchScreen() {
         <Text>Total estimado: {formatCents(totalCents)}</Text>
 
         <Pressable
-          onPress={() =>
+          onPress={() => {
+            if (!session) {
+              router.push('/(auth)/sign-in');
+              return;
+            }
             router.push({
               pathname: '/(screens)/checkout',
               params: { startDate: startId!, endDate: endId! },
-            })
-          }
+            });
+          }}
           disabled={!canContinue}
           style={({ pressed }) => ({
             opacity: !canContinue ? 0.4 : pressed ? 0.7 : 1,

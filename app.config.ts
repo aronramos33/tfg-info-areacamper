@@ -23,10 +23,12 @@ export default {
       },
     },
     web: { bundler: 'metro' },
+    updates: { enabled: false },
     plugins: [
       'expo-router',
       '@react-native-google-signin/google-signin',
       '@react-native-community/datetimepicker',
+      'expo-web-browser',
     ],
     extra: {
       // ⚠️ REEMPLAZA ESTAS VARIABLES CON LAS DE TU PROYECTO SUPABASE

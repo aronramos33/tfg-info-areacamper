@@ -96,8 +96,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     await Promise.all([loadProfile(uid), loadIsOwner(uid)]);
   };
 
-  console.log('[loadIsOwner] uid', profile?.user_id);
-
   useEffect(() => {
     let mounted = true;
 
@@ -113,12 +111,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
         // opcional pero ayuda a evitar estado viejo en transiciones
         setIsOwner(false);
-
-        console.log('[handleSession]', {
-          event: 'setSession',
-          hasUid: !!uid,
-          uid,
-        });
 
         void ensureUserProfile(uid);
         void Promise.all([loadProfile(uid), loadIsOwner(uid)]);
@@ -146,7 +138,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       sub.subscription.unsubscribe();
     };
   }, []);
-  console.log('[loadIsOwner] result', !!profile);
 
   const signOut = async () => {
     await supabase.auth.signOut();

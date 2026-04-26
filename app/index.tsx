@@ -1,20 +1,25 @@
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { Redirect } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../providers/AuthProvider';
+
+const ONBOARDING_KEY = '@onboarding_completed';
 
 export default function Gate() {
   const { session, loading, ownerLoading, isOwner } = useAuth();
-  console.log('GATE RENDER');
-  console.log('GATE STATE', {
-    loading,
-    hasSession: !!session,
-    ownerLoading,
-    isOwner,
-    uid: session?.user?.id,
-  });
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
+  const [onboardingDone, setOnboardingDone] = useState(false);
 
-  // 1) Espera a cargar auth
-  if (loading) {
+  useEffect(() => {
+    AsyncStorage.removeItem(ONBOARDING_KEY).then(() => {
+      setOnboardingDone(false);
+      setOnboardingChecked(true);
+    });
+  }, []);
+
+  // 1) Espera a cargar auth y comprobar onboarding
+  if (loading || !onboardingChecked) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator />
@@ -22,7 +27,7 @@ export default function Gate() {
     );
   }
 
-  // 2) Si hay sesión, espera a resolver el rol SIEMPRE
+  // 2) Si hay sesión, espera a resolver el rol
   if (session && ownerLoading) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
@@ -31,13 +36,16 @@ export default function Gate() {
     );
   }
 
-  // 3) Sin sesión => auth
-  if (!session) return <Redirect href="/(main)/qr" />;
+  // 3) Sin sesión
+  if (!session) {
+    if (!onboardingDone) return <Redirect href="/(onboarding)" />;
+    return <Redirect href="/(main)/services" />;
+  }
 
   // 4) Con sesión => decide por rol
   return isOwner ? (
     <Redirect href="/admin/qr" />
   ) : (
-    <Redirect href="/(main)/qr" />
+    <Redirect href="/(main)/services" />
   );
 }

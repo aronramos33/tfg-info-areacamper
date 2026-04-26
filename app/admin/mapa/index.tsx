@@ -15,20 +15,18 @@ import DateTimePicker, {
   DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
 import dayjs from 'dayjs';
 import isoWeek from 'dayjs/plugin/isoWeek';
 
 dayjs.extend(isoWeek);
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ─────────────────
 type Place = { id: number; name: string; is_active: boolean };
 
 type Reservation = {
   id: number;
-  place_id: number | null;
   place_ids: number[] | null;
   num_places: number | null;
   start_date: string;
@@ -104,7 +102,7 @@ export default function AdminMapaPlazas() {
         supabase
           .from('reservations')
           .select(
-            'id,place_id,place_ids,num_places,start_date,end_date,payment_status,full_name,total_amount_cents,user_id',
+            'id,place_ids,num_places,start_date,end_date,payment_status,full_name,total_amount_cents,user_id',
           )
           .eq('payment_status', 'paid'),
         supabase.from('maintenance_blocks').select('*'),
@@ -208,11 +206,9 @@ export default function AdminMapaPlazas() {
       if (block)
         return block.block_type === 'occupied' ? 'occupied' : 'maintenance';
 
-      const isOccupied = reservationsInPeriod.some((r) => {
-        const ids = r.place_ids ?? [];
-        if (ids.length > 0) return ids.includes(placeId);
-        return r.place_id === placeId;
-      });
+      const isOccupied = reservationsInPeriod.some((r) =>
+        (r.place_ids ?? []).includes(placeId),
+      );
 
       return isOccupied ? 'occupied' : 'free';
     },
@@ -295,9 +291,7 @@ export default function AdminMapaPlazas() {
 
         if (newStatus === 'maintenance') {
           const futureRes = reservations.filter((r) => {
-            const inThisPlace =
-              (r.place_ids ?? []).includes(selectedPlace) ||
-              r.place_id === selectedPlace;
+            const inThisPlace = (r.place_ids ?? []).includes(selectedPlace);
             return inThisPlace && dayjs(r.end_date).isAfter(dayjs());
           });
 
@@ -313,7 +307,7 @@ export default function AdminMapaPlazas() {
             if (newPlace && newPlace !== selectedPlace) {
               await supabase
                 .from('reservations')
-                .update({ place_id: newPlace, place_ids: [newPlace] })
+                .update({ place_ids: [newPlace] })
                 .eq('id', r.id);
               reasigned++;
             }
@@ -497,9 +491,7 @@ export default function AdminMapaPlazas() {
               const plazas =
                 (r.place_ids ?? []).length > 0
                   ? (r.place_ids ?? []).map((id) => `#${id}`).join(', ')
-                  : r.place_id
-                    ? `#${r.place_id}`
-                    : '—';
+                  : '—';
               return (
                 <Pressable
                   key={r.id}

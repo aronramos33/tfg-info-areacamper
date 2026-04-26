@@ -62,6 +62,7 @@ export default function CheckoutScreen() {
     Record<number, number>
   >({});
   const [numPlaces, setNumPlaces] = useState(1);
+  const [nightlyCents, setNightlyCents] = useState<number>(NIGHTLY_CENTS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -72,7 +73,7 @@ export default function CheckoutScreen() {
       ? nightsBetween(startDate!, endDate!)
       : 0;
 
-  const baseTotal = nights * NIGHTLY_CENTS * numPlaces;
+  const baseTotal = nights * nightlyCents * numPlaces;
   const isToggle = (e: Extra) => e.code === 'POWER';
   const maxUnits = (e: Extra) => (isToggle(e) ? 1 : 4);
 
@@ -106,6 +107,14 @@ export default function CheckoutScreen() {
 
     const loadData = async () => {
       try {
+        const { data: pricingData } = await supabase
+          .from('pricing')
+          .select('nightly_amount_cents')
+          .eq('active', true)
+          .single();
+
+        if (pricingData) setNightlyCents(pricingData.nightly_amount_cents);
+
         const { data: profileData } = await supabase
           .from('user_profiles')
           .select('full_name, phone, dni, license_plate')
@@ -240,7 +249,7 @@ export default function CheckoutScreen() {
             phone: phoneToUse,
             dni: dniToUse,
             license_plate: plateToUse,
-            nightly_amount_cents: NIGHTLY_CENTS,
+            nightly_amount_cents: nightlyCents,
             extras: extrasPayload,
           },
         },
@@ -291,14 +300,14 @@ export default function CheckoutScreen() {
           <Text>Entrada: {start?.format('DD/MM/YYYY')}</Text>
           <Text>Salida: {end?.format('DD/MM/YYYY')}</Text>
           <Text>Noches: {nights}</Text>
-          <Text>Precio por noche: {formatCents(NIGHTLY_CENTS)}</Text>
+          <Text>Precio por noche: {formatCents(nightlyCents)}</Text>
         </View>
 
         {/* Número de plazas */}
         <View style={card}>
           <Text style={sectionTitle}>Número de plazas</Text>
           <Text style={{ color: '#666', fontSize: 13, marginBottom: 12 }}>
-            {formatCents(NIGHTLY_CENTS)} × {nights} noche
+            {formatCents(nightlyCents)} × {nights} noche
             {nights !== 1 ? 's' : ''} × plaza
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
@@ -325,7 +334,7 @@ export default function CheckoutScreen() {
               <Text style={counterBtnText}>+</Text>
             </Pressable>
             <Text style={{ color: '#666', fontSize: 14 }}>
-              = {formatCents(nights * NIGHTLY_CENTS * numPlaces)}
+              = {formatCents(nights * nightlyCents * numPlaces)}
             </Text>
           </View>
         </View>

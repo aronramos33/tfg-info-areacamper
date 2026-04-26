@@ -15,6 +15,8 @@ import {
 import QRCode from 'react-native-qrcode-svg';
 import dayjs from 'dayjs';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/providers/AuthProvider';
+import RequireAuthCard from '@/components/RequireAuthCard';
 
 type Reservation = {
   id: number;
@@ -42,6 +44,7 @@ function formatRange(start: string, end: string) {
 export default function QrScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { session } = useAuth();
   const params = useLocalSearchParams<{ reservation_id?: string }>();
 
   const [loading, setLoading] = useState(true);
@@ -275,6 +278,14 @@ export default function QrScreen() {
       </Pressable>
     );
   };
+
+  if (!session) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <RequireAuthCard />
+      </SafeAreaView>
+    );
+  }
 
   if (loading) {
     return (

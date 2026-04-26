@@ -23,7 +23,6 @@ type ReservationDetail = {
   license_plate: string | null;
   start_date: string;
   end_date: string;
-  place_id: number | null;
   place_ids: number[] | null;
   num_places: number | null;
   nightly_amount_cents: number | null;
@@ -94,7 +93,7 @@ export default function ReservationDetailScreen() {
         const { data: r, error } = await supabase
           .from('reservations')
           .select(
-            'id,full_name,dni,phone,license_plate,start_date,end_date,place_id,place_ids,num_places,nightly_amount_cents,total_amount_cents,payment_status,access_code,created_at',
+            'id,full_name,dni,phone,license_plate,start_date,end_date,place_ids,num_places,nightly_amount_cents,total_amount_cents,payment_status,access_code,created_at',
           )
           .eq('id', Number(reservationId))
           .single();
@@ -206,9 +205,7 @@ export default function ReservationDetailScreen() {
                 ? reservation.place_ids
                     .map((id: number) => `Nº ${id}`)
                     .join(', ')
-                : reservation.place_id
-                  ? `Nº ${reservation.place_id}`
-                  : '—'
+                : '—'
             }
           />
           <Row label="Código acceso" value={reservation.access_code ?? '—'} />
