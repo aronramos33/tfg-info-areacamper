@@ -18,6 +18,7 @@ import RequireAuthCard from '@/components/RequireAuthCard';
 import { supabase } from '@/lib/supabase';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
 
 type UserProfileRow = {
   user_id: string;
@@ -25,7 +26,6 @@ type UserProfileRow = {
   last_name: string | null;
   phone: string | null;
   dni: string | null;
-  license_plate: string | null;
 };
 
 function normalizeSpaces(s: string) {
@@ -33,9 +33,6 @@ function normalizeSpaces(s: string) {
 }
 function normalizeUpperAlnum(s: string) {
   return s.replace(/[\s-]/g, '').toUpperCase().trim();
-}
-function normalizePlate(s: string) {
-  return normalizeUpperAlnum(s);
 }
 function normalizeDniNie(s: string) {
   return normalizeUpperAlnum(s);
@@ -78,16 +75,11 @@ function isValidSpanishPhone(value: string): boolean {
   if (!/^\d{9}$/.test(digits)) return false;
   return /^[6789]/.test(digits);
 }
-function isValidSpanishPlate(value: string): boolean {
-  const v = value.trim();
-  if (!v) return true;
-  return /^\d{4}[A-Z]{3}$/.test(normalizePlate(v));
-}
 
 async function fetchUserProfile(userId: string, metaFullName: string) {
   const { data, error } = await supabase
     .from('user_profiles')
-    .select('first_name, last_name, full_name, phone, dni, license_plate')
+    .select('first_name, last_name, full_name, phone, dni')
     .eq('user_id', userId)
     .maybeSingle();
 
@@ -105,14 +97,26 @@ async function fetchUserProfile(userId: string, metaFullName: string) {
       '',
     phone: data?.phone ?? '',
     dni: data?.dni ?? '',
-    license_plate: data?.license_plate ?? '',
   };
+}
+
+async function fetchVehicleCount(userId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('vehicles')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId);
+  if (error) {
+    console.warn('[fetchVehicleCount]', error);
+    return 0;
+  }
+  return count ?? 0;
 }
 
 export default function ProfileIndex() {
   const { session, signOut, isOwner } = useAuth();
   const user = session?.user;
   const navigation = useNavigation<any>();
+  const router = useRouter();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -121,7 +125,7 @@ export default function ProfileIndex() {
   const [lastName, setLastName] = useState('');
   const [dni, setDni] = useState('');
   const [phone, setPhone] = useState('');
-  const [licensePlate, setLicensePlate] = useState('');
+  const [vehicleCount, setVehicleCount] = useState<number | null>(null);
 
   const [showPasswordSection, setShowPasswordSection] = useState(false);
   const [newPassword, setNewPassword] = useState('');
@@ -136,7 +140,6 @@ export default function ProfileIndex() {
     last_name: string;
     dni: string;
     phone: string;
-    license_plate: string;
   } | null>(null);
   const isEditingRef = useRef(false);
 
@@ -175,20 +178,14 @@ export default function ProfileIndex() {
     last_name: string;
     dni: string;
     phone: string;
-    license_plate: string;
   }) => {
     setFirstName(loaded.first_name);
     setLastName(loaded.last_name);
     setDni(loaded.dni);
     setPhone(loaded.phone);
-    setLicensePlate(loaded.license_plate);
     initialRef.current = loaded;
     const any = Boolean(
-      loaded.first_name ||
-        loaded.last_name ||
-        loaded.dni ||
-        loaded.phone ||
-        loaded.license_plate,
+      loaded.first_name || loaded.last_name || loaded.dni || loaded.phone,
     );
     setShowEditButton(any);
     setIsEditing(!any);
@@ -204,13 +201,8 @@ export default function ProfileIndex() {
     setLastName(snap.last_name);
     setDni(snap.dni);
     setPhone(snap.phone);
-    setLicensePlate(snap.license_plate);
     const any = Boolean(
-      snap.first_name ||
-        snap.last_name ||
-        snap.dni ||
-        snap.phone ||
-        snap.license_plate,
+      snap.first_name || snap.last_name || snap.dni || snap.phone,
     );
     setShowEditButton(any);
     setIsEditing(!any);
@@ -224,15 +216,15 @@ export default function ProfileIndex() {
       try {
         const meta =
           (user?.user_metadata?.full_name as string | undefined) ?? '';
-        applyLoaded(await fetchUserProfile(session.user.id, meta));
+        const [profile, vCount] = await Promise.all([
+          fetchUserProfile(session.user.id, meta),
+          fetchVehicleCount(session.user.id),
+        ]);
+        applyLoaded(profile);
+        setVehicleCount(vCount);
       } catch {
-        applyLoaded({
-          first_name: '',
-          last_name: '',
-          phone: '',
-          dni: '',
-          license_plate: '',
-        });
+        applyLoaded({ first_name: '', last_name: '', phone: '', dni: '' });
+        setVehicleCount(0);
       } finally {
         setLoading(false);
       }
@@ -242,22 +234,9 @@ export default function ProfileIndex() {
 
   useFocusEffect(
     React.useCallback(() => {
-      if (!session?.user?.id || isEditingRef.current) return;
-      setLoading(true);
-      const meta = (user?.user_metadata?.full_name as string | undefined) ?? '';
-      fetchUserProfile(session.user.id, meta)
-        .then(applyLoaded)
-        .catch(() =>
-          applyLoaded({
-            first_name: '',
-            last_name: '',
-            phone: '',
-            dni: '',
-            license_plate: '',
-          }),
-        )
-        .finally(() => setLoading(false));
-      // eslint-disable-next-line react-hooks/exhaustive-deps
+      const uid = session?.user?.id;
+      if (!uid) return;
+      void fetchVehicleCount(uid).then(setVehicleCount);
     }, [session?.user?.id]),
   );
 
@@ -268,13 +247,11 @@ export default function ProfileIndex() {
     const normalizedLast = normalizeSpaces(lastName);
     const normalizedDni = normalizeDniNie(dni);
     const normalizedPhone = normalizePhone(phone);
-    const normalizedPlate = normalizePlate(licensePlate);
 
     setFirstName(normalizedFirst);
     setLastName(normalizedLast);
     setDni(normalizedDni);
     setPhone(normalizedPhone);
-    setLicensePlate(normalizedPlate);
 
     if (normalizedFirst && normalizedFirst.length < 2) {
       Alert.alert('Nombre inválido', 'El nombre es demasiado corto.');
@@ -288,10 +265,6 @@ export default function ProfileIndex() {
       Alert.alert('Teléfono inválido', 'Introduce un teléfono español válido.');
       return;
     }
-    if (!isValidSpanishPlate(normalizedPlate)) {
-      Alert.alert('Matrícula inválida', 'Formato esperado: 1234ABC.');
-      return;
-    }
 
     setSaving(true);
     try {
@@ -302,7 +275,6 @@ export default function ProfileIndex() {
           last_name: normalizedLast || null,
           phone: normalizedPhone || null,
           dni: normalizedDni || null,
-          license_plate: normalizedPlate || null,
         } as UserProfileRow,
         { onConflict: 'user_id' },
       );
@@ -456,19 +428,6 @@ export default function ProfileIndex() {
                   <Text style={styles.value}>{phone || '—'}</Text>
                 )}
 
-                <Text style={styles.label}>Matrícula</Text>
-                {isEditing ? (
-                  <TextInput
-                    value={licensePlate}
-                    onChangeText={setLicensePlate}
-                    placeholder="1234ABC"
-                    style={styles.input}
-                    autoCapitalize="characters"
-                  />
-                ) : (
-                  <Text style={styles.value}>{licensePlate || '—'}</Text>
-                )}
-
                 {isEditing && (
                   <View style={[styles.rowButtons, { marginTop: 12 }]}>
                     <View style={styles.flex}>
@@ -491,6 +450,28 @@ export default function ProfileIndex() {
               </>
             )}
           </View>
+
+          {/* ── Mis vehículos ── */}
+          <Pressable
+            style={({ pressed }) => [
+              styles.card,
+              styles.vehiclesCard,
+              pressed && { opacity: 0.7 },
+            ]}
+            onPress={() => router.push('/(main)/profile/vehicles')}
+          >
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Mis vehículos</Text>
+              <Text style={styles.chevron}>›</Text>
+            </View>
+            <Text style={styles.value}>
+              {vehicleCount === null
+                ? '—'
+                : vehicleCount === 0
+                  ? 'Aún no has añadido ningún vehículo'
+                  : `${vehicleCount} ${vehicleCount === 1 ? 'vehículo guardado' : 'vehículos guardados'}`}
+            </Text>
+          </Pressable>
 
           {/* ── Seguridad ── */}
           {isEmailProvider ? (
@@ -623,4 +604,5 @@ const styles = StyleSheet.create({
   },
   rowButtons: { flexDirection: 'row', alignItems: 'center' },
   logoutWrap: { marginTop: 4 },
+  vehiclesCard: { gap: 6 },
 });

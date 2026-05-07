@@ -18,12 +18,19 @@ import { useAuth } from '@/providers/AuthProvider';
 import RequireAuthCard from '@/components/RequireAuthCard';
 import { nightsBetween } from '@/components/utils/dates';
 import { formatCents, NIGHTLY_CENTS } from '@/components/utils/money';
+import {
+  Vehicle,
+  isValidLengthMeters,
+  isValidSpanishPlate,
+  normalizePlate,
+  parseLengthMeters,
+  vehicleDisplayName,
+} from '@/components/utils/vehicle';
 
 type UserProfile = {
   full_name: string;
   phone: string;
   dni: string;
-  license_plate: string;
 };
 
 type Extra = {
@@ -47,15 +54,31 @@ export default function CheckoutScreen() {
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
 
-  // ✅ Form editable (phone + plate siempre; name + dni solo si faltan)
   const [form, setForm] = useState({
     full_name: '',
     dni: '',
     phone: '',
-    license_plate: '',
   });
   const setField = (key: keyof typeof form, value: string) =>
     setForm((p) => ({ ...p, [key]: value }));
+
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(
+    null,
+  );
+  const [showNewVehicleForm, setShowNewVehicleForm] = useState(false);
+  const [newVehicle, setNewVehicle] = useState({
+    brand: '',
+    model: '',
+    plate: '',
+    alias: '',
+    length_m: '',
+  });
+  const [savingVehicle, setSavingVehicle] = useState(false);
+  const setNewVehicleField = (
+    key: keyof typeof newVehicle,
+    value: string,
+  ) => setNewVehicle((p) => ({ ...p, [key]: value }));
 
   const [extras, setExtras] = useState<Extra[]>([]);
   const [extraQuantities, setExtraQuantities] = useState<
@@ -117,11 +140,10 @@ export default function CheckoutScreen() {
 
         const { data: profileData } = await supabase
           .from('user_profiles')
-          .select('full_name, phone, dni, license_plate')
+          .select('full_name, phone, dni')
           .eq('user_id', session.user.id)
           .single();
 
-        // Si full_name está vacío intenta construirlo desde first/last name
         let fullName = profileData?.full_name ?? '';
         if (!fullName) {
           const meta = session.user.user_metadata;
@@ -134,13 +156,21 @@ export default function CheckoutScreen() {
           profileData ? { ...profileData, full_name: fullName } : null,
         );
 
-        // ✅ Inicializa el form con lo que haya (o vacío)
         setForm({
           full_name: fullName ?? '',
           dni: profileData?.dni ?? '',
           phone: profileData?.phone ?? '',
-          license_plate: profileData?.license_plate ?? '',
         });
+
+        const { data: vehiclesData } = await supabase
+          .from('vehicles')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .order('created_at', { ascending: true });
+
+        const vList = (vehiclesData ?? []) as Vehicle[];
+        setVehicles(vList);
+        if (vList.length === 1) setSelectedVehicleId(vList[0].id);
 
         const { data: extrasData } = await supabase
           .from('extras')
@@ -190,32 +220,37 @@ export default function CheckoutScreen() {
       return;
     }
 
-    // ✅ Validación según reglas: phone+plate siempre; name+dni solo si faltan en perfil
     const fullNameToUse = profile.full_name
       ? profile.full_name
       : form.full_name.trim();
     const dniToUse = profile.dni ? profile.dni : form.dni.trim();
     const phoneToUse = form.phone.trim();
-    const plateToUse = form.license_plate.trim();
 
-    if (!fullNameToUse || !dniToUse || !phoneToUse || !plateToUse) {
+    if (!fullNameToUse || !dniToUse || !phoneToUse) {
       Alert.alert(
         'Perfil incompleto',
-        'Completa tu nombre, DNI, teléfono y matrícula antes de reservar.',
+        'Completa tu nombre, DNI y teléfono antes de reservar.',
+      );
+      return;
+    }
+
+    const vehicle = vehicles.find((v) => v.id === selectedVehicleId);
+    if (!vehicle) {
+      Alert.alert(
+        'Vehículo no seleccionado',
+        'Selecciona el vehículo con el que vas a acampar (o añade uno nuevo).',
       );
       return;
     }
 
     setSaving(true);
     try {
-      // ✅ Persistir cambios en BD antes de pagar
       const { error: upErr } = await supabase.from('user_profiles').upsert(
         {
           user_id: session.user.id,
           full_name: fullNameToUse,
           dni: dniToUse,
           phone: phoneToUse,
-          license_plate: plateToUse,
         },
         { onConflict: 'user_id' },
       );
@@ -248,7 +283,12 @@ export default function CheckoutScreen() {
             full_name: fullNameToUse,
             phone: phoneToUse,
             dni: dniToUse,
-            license_plate: plateToUse,
+            vehicle_id: vehicle.id,
+            vehicle_brand: vehicle.brand,
+            vehicle_model: vehicle.model,
+            vehicle_plate: vehicle.plate,
+            vehicle_alias: vehicle.alias ?? '',
+            vehicle_length_m: vehicle.length_m,
             nightly_amount_cents: nightlyCents,
             extras: extrasPayload,
           },
@@ -377,15 +417,220 @@ export default function CheckoutScreen() {
             keyboardType="phone-pad"
             style={input}
           />
+        </View>
 
-          <Text style={{ marginTop: 12, color: '#666' }}>Matrícula</Text>
-          <TextInput
-            value={form.license_plate}
-            onChangeText={(t) => setField('license_plate', t)}
-            placeholder="Matrícula"
-            autoCapitalize="characters"
-            style={input}
-          />
+        {/* Vehículo */}
+        <View style={card}>
+          <Text style={sectionTitle}>Vehículo</Text>
+          {vehicles.length === 0 && !showNewVehicleForm && (
+            <Text style={{ color: '#666', marginBottom: 10 }}>
+              Aún no tienes vehículos guardados. Añade uno para continuar.
+            </Text>
+          )}
+
+          {vehicles.map((v) => {
+            const selected = selectedVehicleId === v.id;
+            return (
+              <Pressable
+                key={v.id}
+                onPress={() => setSelectedVehicleId(v.id)}
+                style={{
+                  borderWidth: 2,
+                  borderColor: selected ? '#1A73E8' : '#E5E7EB',
+                  backgroundColor: selected ? '#EAF1FE' : '#fff',
+                  borderRadius: 12,
+                  padding: 12,
+                  marginBottom: 10,
+                }}
+              >
+                <Text style={{ fontWeight: '700', fontSize: 15 }}>
+                  {vehicleDisplayName(v)}
+                </Text>
+                <Text style={{ color: '#555', fontSize: 13 }}>
+                  {v.brand} {v.model}
+                </Text>
+                <Text
+                  style={{
+                    color: '#1A73E8',
+                    fontWeight: '700',
+                    marginTop: 2,
+                    letterSpacing: 1,
+                  }}
+                >
+                  {v.plate}
+                </Text>
+              </Pressable>
+            );
+          })}
+
+          {showNewVehicleForm ? (
+            <View
+              style={{
+                borderWidth: 1,
+                borderColor: '#E5E7EB',
+                borderRadius: 12,
+                padding: 12,
+                gap: 8,
+                backgroundColor: '#FAFBFD',
+              }}
+            >
+              <Text style={{ fontWeight: '700' }}>Nuevo vehículo</Text>
+              <TextInput
+                value={newVehicle.brand}
+                onChangeText={(t) => setNewVehicleField('brand', t)}
+                placeholder="Marca *"
+                style={input}
+                autoCapitalize="words"
+              />
+              <TextInput
+                value={newVehicle.model}
+                onChangeText={(t) => setNewVehicleField('model', t)}
+                placeholder="Modelo *"
+                style={input}
+              />
+              <TextInput
+                value={newVehicle.plate}
+                onChangeText={(t) => setNewVehicleField('plate', t)}
+                placeholder="Matrícula * (1234ABC)"
+                style={input}
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
+              <TextInput
+                value={newVehicle.alias}
+                onChangeText={(t) => setNewVehicleField('alias', t)}
+                placeholder="Alias (opcional)"
+                style={input}
+              />
+              <TextInput
+                value={newVehicle.length_m}
+                onChangeText={(t) => setNewVehicleField('length_m', t)}
+                placeholder="Longitud en metros (opcional)"
+                style={input}
+                keyboardType="decimal-pad"
+              />
+              <View
+                style={{ flexDirection: 'row', gap: 10, marginTop: 6 }}
+              >
+                <Pressable
+                  onPress={() => {
+                    setShowNewVehicleForm(false);
+                    setNewVehicle({
+                      brand: '',
+                      model: '',
+                      plate: '',
+                      alias: '',
+                      length_m: '',
+                    });
+                  }}
+                  disabled={savingVehicle}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: '#ddd',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text style={{ fontWeight: '600' }}>Cancelar</Text>
+                </Pressable>
+                <Pressable
+                  disabled={savingVehicle}
+                  onPress={async () => {
+                    if (!session?.user?.id) return;
+                    if (!newVehicle.brand.trim()) {
+                      Alert.alert('Marca obligatoria', 'Indica la marca.');
+                      return;
+                    }
+                    if (!newVehicle.model.trim()) {
+                      Alert.alert('Modelo obligatorio', 'Indica el modelo.');
+                      return;
+                    }
+                    if (!isValidSpanishPlate(newVehicle.plate)) {
+                      Alert.alert(
+                        'Matrícula inválida',
+                        'Formato esperado: 1234ABC.',
+                      );
+                      return;
+                    }
+                    if (!isValidLengthMeters(newVehicle.length_m)) {
+                      Alert.alert(
+                        'Longitud inválida',
+                        'Indica un valor entre 0 y 20 metros.',
+                      );
+                      return;
+                    }
+                    setSavingVehicle(true);
+                    const payload = {
+                      user_id: session.user.id,
+                      brand: newVehicle.brand.trim(),
+                      model: newVehicle.model.trim(),
+                      plate: normalizePlate(newVehicle.plate),
+                      alias: newVehicle.alias.trim() || null,
+                      length_m: parseLengthMeters(newVehicle.length_m),
+                    };
+                    const { data, error } = await supabase
+                      .from('vehicles')
+                      .insert(payload)
+                      .select('*')
+                      .single();
+                    setSavingVehicle(false);
+                    if (error) {
+                      if ((error as any).code === '23505') {
+                        Alert.alert(
+                          'Matrícula duplicada',
+                          'Ya tienes un vehículo con esa matrícula.',
+                        );
+                        return;
+                      }
+                      Alert.alert('Error', error.message);
+                      return;
+                    }
+                    const inserted = data as Vehicle;
+                    setVehicles((prev) => [...prev, inserted]);
+                    setSelectedVehicleId(inserted.id);
+                    setShowNewVehicleForm(false);
+                    setNewVehicle({
+                      brand: '',
+                      model: '',
+                      plate: '',
+                      alias: '',
+                      length_m: '',
+                    });
+                  }}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                    backgroundColor: '#1A73E8',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text style={{ color: 'white', fontWeight: '700' }}>
+                    {savingVehicle ? 'Guardando…' : 'Guardar y elegir'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <Pressable
+              onPress={() => setShowNewVehicleForm(true)}
+              style={{
+                paddingVertical: 12,
+                borderRadius: 12,
+                borderWidth: 2,
+                borderColor: '#1A73E8',
+                borderStyle: 'dashed',
+                alignItems: 'center',
+                marginTop: 4,
+              }}
+            >
+              <Text style={{ color: '#1A73E8', fontWeight: '700' }}>
+                + Añadir vehículo nuevo
+              </Text>
+            </Pressable>
+          )}
         </View>
 
         {/* Extras */}

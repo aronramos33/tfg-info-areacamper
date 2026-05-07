@@ -33,7 +33,6 @@ export default function AuthScreen() {
   const [lastName, setLastName] = useState('');
   const [dni, setDni] = useState('');
   const [phone, setPhone] = useState('');
-  const [licensePlate, setLicensePlate] = useState('');
   const [signUpLoading, setSignUpLoading] = useState(false);
 
   const handleSignUp = async () => {
@@ -76,7 +75,6 @@ export default function AuthScreen() {
               full_name: fullName,
               dni: dni.trim().toUpperCase() || null,
               phone: phone.trim() || null,
-              license_plate: licensePlate.trim().toUpperCase() || null,
             },
             { onConflict: 'user_id' },
           );
@@ -250,17 +248,9 @@ export default function AuthScreen() {
                 placeholderTextColor="#aaa"
               />
             </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>Matrícula (opcional)</Text>
-              <TextInput
-                value={licensePlate}
-                onChangeText={setLicensePlate}
-                placeholder="1234ABC"
-                autoCapitalize="characters"
-                style={styles.input}
-                placeholderTextColor="#aaa"
-              />
-            </View>
+            <Text style={[styles.helper, { marginTop: 4 }]}>
+              Podrás añadir tus vehículos desde tu perfil tras crear la cuenta.
+            </Text>
             <Pressable
               onPress={handleSignUp}
               disabled={signUpLoading}
@@ -398,5 +388,10 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '700',
+  },
+  helper: {
+    fontSize: 13,
+    color: '#888',
+    fontStyle: 'italic',
   },
 });

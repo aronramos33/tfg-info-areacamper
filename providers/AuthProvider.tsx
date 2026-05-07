@@ -7,7 +7,6 @@ type UserProfile = {
   full_name: string;
   phone: string;
   dni: string;
-  license_plate: string;
   preferred_locale: string | null;
   accepted_terms_at: string | null;
   created_at: string | null;

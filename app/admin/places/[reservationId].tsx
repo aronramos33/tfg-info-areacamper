@@ -20,7 +20,12 @@ type ReservationDetail = {
   full_name: string | null;
   dni: string | null;
   phone: string | null;
-  license_plate: string | null;
+  vehicle_id: number | null;
+  vehicle_brand: string | null;
+  vehicle_model: string | null;
+  vehicle_plate: string | null;
+  vehicle_alias: string | null;
+  vehicle_length_m: number | null;
   start_date: string;
   end_date: string;
   place_ids: number[] | null;
@@ -93,7 +98,7 @@ export default function ReservationDetailScreen() {
         const { data: r, error } = await supabase
           .from('reservations')
           .select(
-            'id,full_name,dni,phone,license_plate,start_date,end_date,place_ids,num_places,nightly_amount_cents,total_amount_cents,payment_status,access_code,created_at',
+            'id,full_name,dni,phone,vehicle_id,vehicle_brand,vehicle_model,vehicle_plate,vehicle_alias,vehicle_length_m,start_date,end_date,place_ids,num_places,nightly_amount_cents,total_amount_cents,payment_status,access_code,created_at',
           )
           .eq('id', Number(reservationId))
           .single();
@@ -186,7 +191,34 @@ export default function ReservationDetailScreen() {
           <Row label="Nombre" value={reservation.full_name ?? '—'} />
           <Row label="DNI" value={reservation.dni ?? '—'} />
           <Row label="Teléfono" value={reservation.phone ?? '—'} />
-          <Row label="Matrícula" value={reservation.license_plate ?? '—'} />
+        </View>
+
+        {/* Vehículo */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>🚐 Vehículo</Text>
+          {reservation.vehicle_alias && (
+            <Row label="Alias" value={reservation.vehicle_alias} />
+          )}
+          <Row
+            label="Marca y modelo"
+            value={
+              [reservation.vehicle_brand, reservation.vehicle_model]
+                .filter(Boolean)
+                .join(' ') || '—'
+            }
+          />
+          <Row label="Matrícula" value={reservation.vehicle_plate ?? '—'} />
+          {reservation.vehicle_length_m != null && (
+            <Row
+              label="Longitud"
+              value={`${reservation.vehicle_length_m} m`}
+            />
+          )}
+          {reservation.vehicle_id == null && (
+            <Text style={{ color: '#888', fontSize: 12, marginTop: 6 }}>
+              ⚠️ El vehículo original ya no existe en el perfil del usuario.
+            </Text>
+          )}
         </View>
 
         {/* Estancia */}

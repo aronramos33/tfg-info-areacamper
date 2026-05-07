@@ -90,6 +90,7 @@ Mapa completo de rutas del proyecto con su archivo correspondiente:
 | `/(main)/services` | `app/(main)/services/index.tsx` | Catálogo de servicios con selector de fechas |
 | `/(main)/services/[serviceId]` | `app/(main)/services/[serviceId].tsx` | Detalle de servicio + flujo de reserva |
 | `/(main)/profile` | `app/(main)/profile/index.tsx` | Perfil de usuario, métodos de pago, cambio de contraseña |
+| `/(main)/profile/vehicles` | `app/(main)/profile/vehicles.tsx` | CRUD de vehículos del usuario (marca, modelo, matrícula, alias, longitud) |
 | `/(screens)/checkout` | `app/(screens)/checkout.tsx` | Flujo de pago de una reserva |
 | `/(screens)/success` | `app/(screens)/success.tsx` | Confirmación de reserva completada |
 | `/admin/qr` | `app/admin/qr/index.tsx` | Escáner QR para check-in (solo propietario) |
@@ -146,7 +147,6 @@ Perfil extendido del usuario. PK: `user_id` → `auth.users.id`
 | `full_name` | text | nullable |
 | `phone` | text | |
 | `dni` | text | |
-| `license_plate` | text | matrícula del vehículo |
 | `preferred_locale` | text | default `'es'` |
 | `accepted_terms_at` | timestamptz | nullable |
 | `created_at` | timestamptz | default now() |
@@ -192,7 +192,12 @@ Reservas de usuarios. Enum `status`: `pending` → `confirmed` → `checked_in` 
 | `full_name` | text | nombre del titular |
 | `phone` | text | |
 | `dni` | text | |
-| `license_plate` | text | |
+| `vehicle_id` | bigint | FK → vehicles (nullable, ON DELETE SET NULL) |
+| `vehicle_brand` | text | snapshot histórico de la marca del vehículo |
+| `vehicle_model` | text | snapshot histórico del modelo |
+| `vehicle_plate` | text | snapshot histórico de la matrícula |
+| `vehicle_alias` | text | snapshot histórico del alias |
+| `vehicle_length_m` | numeric(4,2) | snapshot histórico de la longitud en m |
 | `nightly_amount_cents` | integer | precio/noche en el momento |
 | `total_amount_cents` | integer | total a pagar |
 | `status` | enum | pending/confirmed/checked_in/checked_out/cancelled |
@@ -207,6 +212,22 @@ Reservas de usuarios. Enum `status`: `pending` → `confirmed` → `checked_in` 
 | `currency` | text | default `'eur'` |
 | `paid_at` | timestamptz | nullable |
 | `created_at` | timestamptz | default now() |
+
+#### `vehicles`
+Vehículos de cada usuario (relación 1:N). Un usuario puede tener múltiples vehículos.
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | bigint | PK, identity |
+| `user_id` | uuid | FK → auth.users (ON DELETE CASCADE) |
+| `brand` | text | marca |
+| `model` | text | modelo |
+| `plate` | text | matrícula |
+| `alias` | text | apodo opcional |
+| `length_m` | numeric(4,2) | longitud en metros (opcional) |
+| `created_at` | timestamptz | default now() |
+
+UNIQUE `(user_id, plate)`. RLS: cada usuario solo ve/edita los suyos.
 
 #### `extras`
 Servicios extra contratables. Enum `pricing_type`: `per_night` / `per_stay`.
