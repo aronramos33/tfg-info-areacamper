@@ -75,17 +75,7 @@ export default function AdminReservas() {
           )
           .order('start_date', { ascending: false });
 
-        const ownersRes = await supabase.from('owners').select('user_id');
-
-        const ownerIds = new Set(
-          (ownersRes.data ?? []).map((o: any) => o.user_id),
-        );
-
-        setReservations(
-          ((reservationsRes.data ?? []) as Reservation[]).filter(
-            (r) => !ownerIds.has(r.user_id),
-          ),
-        );
+        setReservations((reservationsRes.data ?? []) as Reservation[]);
 
         setLoading(false);
       })();

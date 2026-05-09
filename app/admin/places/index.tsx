@@ -114,7 +114,7 @@ export default function AdminDashboard() {
   // ── Load ───────────────────────────────────────────────────────────────────
   const load = async () => {
     setLoading(true);
-    const [placesRes, reservationsRes, ownersRes, extrasRes] =
+    const [placesRes, reservationsRes, extrasRes] =
       await Promise.all([
         supabase.from('places').select('*').order('id'),
         supabase
@@ -123,21 +123,14 @@ export default function AdminDashboard() {
             'id,place_ids,num_places,start_date,end_date,payment_status,full_name,total_amount_cents,nightly_amount_cents,created_at,user_id',
           )
           .eq('payment_status', 'paid'),
-        supabase.from('owners').select('user_id'),
         supabase
           .from('reservation_extras')
           .select('line_total_cents,reservation_id,extras(code,name_es)'),
       ]);
 
-    const ownerIds = new Set((ownersRes.data ?? []).map((o: any) => o.user_id));
-    const allReservations = (
-      (reservationsRes.data ?? []) as Reservation[]
-    ).filter((r) => !ownerIds.has(r.user_id));
+    const allReservations = (reservationsRes.data ?? []) as Reservation[];
 
-    // IDs válidos para filtrar extras de owners
-    const validIds = new Set(allReservations.map((r) => r.id));
     const rows = ((extrasRes.data ?? []) as any[])
-      .filter((row) => validIds.has(row.reservation_id))
       .map((row) => ({
         reservation_id: row.reservation_id as number,
         line_total_cents: Number(row.line_total_cents ?? 0),

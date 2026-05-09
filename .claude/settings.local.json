@@ -28,7 +28,8 @@
       "Bash(npm uninstall *)",
       "Bash(del *)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\aronr\\\\Documents\\\\tfg-info-areacamper\" -Recurse -Include \"*.ts\" -Path \"*supabase*functions*\")",
-      "Bash(Select-Object FullName)"
+      "Bash(Select-Object FullName)",
+      "mcp__claude_ai_Supabase__list_migrations"
     ]
   }
 }
