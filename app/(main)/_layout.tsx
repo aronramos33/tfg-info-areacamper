@@ -40,7 +40,7 @@ export default function MainTabs() {
       />
 
       <Tabs.Screen
-        name="qr/index"
+        name="qr"
         options={{
           title: 'Mis Viajes',
           tabBarIcon: ({ color, size }) => (

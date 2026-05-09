@@ -61,6 +61,7 @@ export const blackOnWhiteTheme: CalendarTheme = {
 type Props = {
   minDate?: string; // YYYY-MM-DD
   maxDate?: string; // YYYY-MM-DD
+  disabledDates?: string[]; // YYYY-MM-DD[]
   onChange: (range: { startId?: string; endId?: string }) => void;
   monthsWindow?: number; // por defecto 12
 };
@@ -68,6 +69,7 @@ type Props = {
 export default function CalendarRangePaged({
   minDate,
   maxDate,
+  disabledDates,
   onChange,
   monthsWindow = 12,
 }: Props) {
@@ -166,6 +168,7 @@ export default function CalendarRangePaged({
         calendarFirstDayOfWeek="monday"
         calendarMinDateId={today.format('YYYY-MM-DD')}
         calendarMaxDateId={windowEnd.format('YYYY-MM-DD')}
+        calendarDisabledDateIds={disabledDates ?? []}
         calendarActiveDateRanges={activeRanges}
         onCalendarDayPress={onCalendarDayPress}
         calendarDayHeight={34}

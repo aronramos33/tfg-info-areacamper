@@ -23,11 +23,14 @@ type Reservation = {
   user_id: string;
   start_date: string;
   end_date: string;
+  status: string | null;
   payment_status: string | null;
   total_amount_cents: number | null;
   access_code: string | null;
   access_expires_at: string | null;
   created_at: string;
+  modified_at: string | null;
+  cancelled_at: string | null;
 };
 
 function formatEuro(cents?: number | null) {
@@ -54,6 +57,7 @@ export default function QrScreen() {
   );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showPast, setShowPast] = useState(false);
+  const [showCancelled, setShowCancelled] = useState(false);
 
   // ✅ NUEVO: token rotativo para el QR
   const [qrPass, setQrPass] = useState<string>('');
@@ -81,7 +85,7 @@ export default function QrScreen() {
       const { data, error } = await supabase
         .from('reservations')
         .select(
-          'id,user_id,start_date,end_date,payment_status,total_amount_cents,access_code,access_expires_at,created_at',
+          'id,user_id,start_date,end_date,status,payment_status,total_amount_cents,access_code,access_expires_at,created_at,modified_at,cancelled_at',
         )
         .eq('user_id', userId)
         .order('start_date', { ascending: true });
@@ -138,12 +142,19 @@ export default function QrScreen() {
     [reservations, selectedId],
   );
 
-  const { active, upcoming, past } = useMemo(() => {
+  const { active, upcoming, past, cancelled } = useMemo(() => {
     const active: Reservation[] = [];
     const upcoming: Reservation[] = [];
     const past: Reservation[] = [];
+    const cancelled: Reservation[] = [];
 
     for (const r of reservations) {
+      // ✅ Cancelada va a su propia sección sin importar la fecha
+      if (r.status === 'cancelled') {
+        cancelled.push(r);
+        continue;
+      }
+
       const s = dayjs(r.start_date);
       const e = dayjs(r.end_date).endOf('day');
 
@@ -175,13 +186,26 @@ export default function QrScreen() {
     past.sort(
       (a, b) => dayjs(b.start_date).valueOf() - dayjs(a.start_date).valueOf(),
     );
+    // Canceladas ordenadas por fecha de cancelación (más recientes primero), fallback a start_date
+    cancelled.sort((a, b) => {
+      const da = a.cancelled_at
+        ? dayjs(a.cancelled_at).valueOf()
+        : dayjs(a.start_date).valueOf();
+      const db = b.cancelled_at
+        ? dayjs(b.cancelled_at).valueOf()
+        : dayjs(b.start_date).valueOf();
+      return db - da;
+    });
 
-    return { active, upcoming, past };
+    return { active, upcoming, past, cancelled };
   }, [reservations]);
 
   // ✅ NUEVO: si no hay nada en ninguna lista, mostramos estado vacío con CTA
   const hasAnyReservations =
-    active.length > 0 || upcoming.length > 0 || past.length > 0;
+    active.length > 0 ||
+    upcoming.length > 0 ||
+    past.length > 0 ||
+    cancelled.length > 0;
 
   const qrAvailability = useMemo(() => {
     if (!selected)
@@ -265,16 +289,36 @@ export default function QrScreen() {
 
   const ReservationItem = ({ r }: { r: Reservation }) => {
     const isSelected = r.id === selectedId;
+    const cancelled = r.status === 'cancelled';
+    const wasModified = !!r.modified_at && !cancelled;
 
     return (
       <Pressable
-        onPress={() => setSelectedId(r.id)}
+        onLongPress={() => setSelectedId(r.id)}
+        onPress={() => router.push(`/(main)/qr/${r.id}`)}
         style={[styles.item, isSelected && styles.itemActive]}
       >
-        <Text style={styles.itemTitle}>
-          {formatRange(r.start_date, r.end_date)}
-        </Text>
+        <View style={styles.itemHeader}>
+          <Text style={styles.itemTitle}>
+            {formatRange(r.start_date, r.end_date)}
+          </Text>
+          <Text style={styles.itemChevron}>›</Text>
+        </View>
         <Text style={styles.itemSub}>{formatEuro(r.total_amount_cents)}</Text>
+        {(cancelled || wasModified) && (
+          <View style={styles.badgeRow}>
+            {cancelled && (
+              <View style={[styles.badge, styles.badgeCancelled]}>
+                <Text style={styles.badgeText}>Cancelada</Text>
+              </View>
+            )}
+            {wasModified && (
+              <View style={[styles.badge, styles.badgeModified]}>
+                <Text style={styles.badgeText}>Modificada</Text>
+              </View>
+            )}
+          </View>
+        )}
       </Pressable>
     );
   };
@@ -443,6 +487,29 @@ export default function QrScreen() {
           </>
         )}
 
+        {/* Canceladas (solo si hay) */}
+        {cancelled.length > 0 && (
+          <>
+            <Pressable
+              style={[styles.sectionRow, { marginTop: 18 }]}
+              onPress={() => setShowCancelled((v) => !v)}
+            >
+              <Text style={styles.section}>Canceladas</Text>
+              <Text style={styles.sectionToggle}>
+                {showCancelled ? 'Ocultar' : 'Mostrar'}
+              </Text>
+            </Pressable>
+
+            {showCancelled ? (
+              <View style={styles.listCard}>
+                {cancelled.map((r) => (
+                  <ReservationItem key={r.id} r={r} />
+                ))}
+              </View>
+            ) : null}
+          </>
+        )}
+
         {/* Anteriores (solo si hay) */}
         {past.length > 0 && (
           <>
@@ -524,8 +591,23 @@ const styles = StyleSheet.create({
 
   item: { paddingVertical: 12, paddingHorizontal: 12, borderRadius: 12 },
   itemActive: { backgroundColor: '#EEF4FF' },
+  itemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   itemTitle: { fontWeight: '800' },
   itemSub: { color: '#666', marginTop: 4 },
+  itemChevron: { color: '#999', fontSize: 20, fontWeight: '700' },
+  badgeRow: { flexDirection: 'row', gap: 6, marginTop: 8 },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  badgeCancelled: { backgroundColor: '#fdecea' },
+  badgeModified: { backgroundColor: '#e3f2fd' },
+  badgeText: { fontSize: 11, fontWeight: '700', color: '#333' },
 
   qrPlaceholder: {
     width: 220,

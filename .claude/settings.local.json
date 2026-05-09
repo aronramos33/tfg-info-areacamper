@@ -21,7 +21,12 @@
       "Bash(git commit -m ' *)",
       "Bash(git checkout *)",
       "Bash(git merge *)",
-      "Bash(dir supabase *)"
+      "Bash(dir supabase *)",
+      "Bash(mkdir \"[reservationId]\")",
+      "Bash(mv \"[reservationId].tsx\" \"[reservationId]/index.tsx\")",
+      "Bash(npx expo *)",
+      "Bash(npm uninstall *)",
+      "Bash(del *)"
     ]
   }
 }

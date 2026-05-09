@@ -29,7 +29,11 @@ function formatDate(d: string | null) {
 
 export default function SuccessPage() {
   const router = useRouter();
-  const { session_id } = useLocalSearchParams<{ session_id?: string }>();
+  const { session_id, mode } = useLocalSearchParams<{
+    session_id?: string;
+    mode?: string;
+  }>();
+  const isModify = mode === 'modify';
 
   const [reservation, setReservation] = useState<ReservationRow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,21 +72,45 @@ export default function SuccessPage() {
     const timer = setInterval(async () => {
       ticks += 1;
 
-      const { data } = await supabase
-        .from('reservations')
-        .select(
-          'id,start_date,end_date,total_amount_cents,payment_status,access_code',
-        )
-        .eq('checkout_session_id', session_id)
-        .maybeSingle();
+      if (isModify) {
+        const { data: pay } = await supabase
+          .from('reservation_payments')
+          .select('reservation_id, status')
+          .eq('stripe_checkout_session_id', session_id)
+          .maybeSingle();
 
-      if (!isMounted) return;
+        if (!isMounted) return;
 
-      if (data) {
-        setReservation(data as ReservationRow);
-        setLoading(false);
-        clearInterval(timer);
-        return;
+        if (pay && pay.status === 'completed' && pay.reservation_id) {
+          const { data: r } = await supabase
+            .from('reservations')
+            .select(
+              'id,start_date,end_date,total_amount_cents,payment_status,access_code',
+            )
+            .eq('id', pay.reservation_id)
+            .maybeSingle();
+          if (r) setReservation(r as ReservationRow);
+          setLoading(false);
+          clearInterval(timer);
+          return;
+        }
+      } else {
+        const { data } = await supabase
+          .from('reservations')
+          .select(
+            'id,start_date,end_date,total_amount_cents,payment_status,access_code',
+          )
+          .eq('checkout_session_id', session_id)
+          .maybeSingle();
+
+        if (!isMounted) return;
+
+        if (data) {
+          setReservation(data as ReservationRow);
+          setLoading(false);
+          clearInterval(timer);
+          return;
+        }
       }
 
       if (ticks >= MAX_TICKS) {
@@ -96,7 +124,7 @@ export default function SuccessPage() {
       isMounted = false;
       clearInterval(timer);
     };
-  }, [session_id, sessionReady]);
+  }, [session_id, sessionReady, isModify]);
 
   const isPaid = reservation?.payment_status === 'paid';
 
@@ -105,7 +133,9 @@ export default function SuccessPage() {
       {loading ? (
         <>
           <ActivityIndicator size="large" />
-          <Text style={styles.subtle}>Confirmando tu reserva…</Text>
+          <Text style={styles.subtle}>
+            {isModify ? 'Aplicando tus cambios…' : 'Confirmando tu reserva…'}
+          </Text>
           <Text style={[styles.subtle, { marginTop: 4 }]}>
             Esto puede tardar unos segundos.
           </Text>
@@ -115,8 +145,11 @@ export default function SuccessPage() {
           <Ionicons name="time-outline" size={80} color="#FF9500" />
           <Text style={styles.title}>Pago recibido</Text>
           <Text style={[styles.subtle, { textAlign: 'center' }]}>
-            El pago se ha procesado pero la reserva está tardando en
-            confirmarse. Revisa tus reservas en unos minutos.
+            El pago se ha procesado pero{' '}
+            {isModify
+              ? 'la modificación está tardando en aplicarse'
+              : 'la reserva está tardando en confirmarse'}
+            . Revisa tus reservas en unos minutos.
           </Text>
           <Pressable
             style={styles.primaryButton}
@@ -133,7 +166,11 @@ export default function SuccessPage() {
             color={isPaid ? '#4CAF50' : '#FF9500'}
           />
           <Text style={styles.title}>
-            {isPaid ? '¡Reserva confirmada!' : 'Procesando…'}
+            {isModify
+              ? '¡Reserva actualizada!'
+              : isPaid
+                ? '¡Reserva confirmada!'
+                : 'Procesando…'}
           </Text>
 
           {reservation && (

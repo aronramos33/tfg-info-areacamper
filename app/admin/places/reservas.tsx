@@ -19,8 +19,11 @@ type Reservation = {
   start_date: string;
   end_date: string;
   payment_status: string;
+  status: string;
   full_name: string | null;
   total_amount_cents: number | null;
+  refund_amount_cents: number | null;
+  cancelled_at: string | null;
   user_id: string;
 };
 
@@ -34,11 +37,18 @@ function formatDate(d: string) {
 const STATUS_LABELS: Record<string, string> = {
   paid: '✅ Pagada',
   refunded: '↩️ Reembolsada',
+  cancelled: '❌ Cancelada',
 };
 const STATUS_COLORS: Record<string, string> = {
   paid: '#e8f5e9',
   refunded: '#e3f2fd',
+  cancelled: '#fdecea',
 };
+
+function reservationDisplayStatus(r: Reservation): string {
+  if (r.status === 'cancelled') return 'cancelled';
+  return r.payment_status;
+}
 
 export default function AdminReservas() {
   const router = useRouter();
@@ -61,7 +71,7 @@ export default function AdminReservas() {
         const reservationsRes = await supabase
           .from('reservations')
           .select(
-            'id,start_date,end_date,payment_status,full_name,total_amount_cents,user_id',
+            'id,start_date,end_date,payment_status,status,full_name,total_amount_cents,refund_amount_cents,cancelled_at,user_id',
           )
           .order('start_date', { ascending: false });
 
@@ -83,8 +93,10 @@ export default function AdminReservas() {
   );
 
   const filtered = reservations.filter((r) => {
-    if (statusFilter !== 'all' && r.payment_status !== statusFilter)
-      return false;
+    if (statusFilter !== 'all') {
+      const display = reservationDisplayStatus(r);
+      if (display !== statusFilter) return false;
+    }
     if (searchId.trim() && !String(r.id).includes(searchId.trim()))
       return false;
     if (searchName.trim()) {
@@ -128,6 +140,7 @@ export default function AdminReservas() {
               { key: 'all', label: 'Todas' },
               { key: 'paid', label: '✅ Pagadas' },
               { key: 'refunded', label: '↩️ Reembolsadas' },
+              { key: 'cancelled', label: '❌ Canceladas' },
             ].map((s) => (
               <Pressable
                 key={s.key}
@@ -232,12 +245,13 @@ export default function AdminReservas() {
                         styles.badge,
                         {
                           backgroundColor:
-                            STATUS_COLORS[r.payment_status] ?? '#eee',
+                            STATUS_COLORS[reservationDisplayStatus(r)] ?? '#eee',
                         },
                       ]}
                     >
                       <Text style={styles.badgeText}>
-                        {STATUS_LABELS[r.payment_status] ?? r.payment_status}
+                        {STATUS_LABELS[reservationDisplayStatus(r)] ??
+                          r.payment_status}
                       </Text>
                     </View>
                     <Text style={styles.chevron}>›</Text>
