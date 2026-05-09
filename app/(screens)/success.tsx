@@ -17,6 +17,15 @@ type ReservationRow = {
   total_amount_cents: number | null;
   payment_status: string;
   access_code: string | null;
+  full_name: string | null;
+  vehicle_brand: string | null;
+  vehicle_model: string | null;
+  vehicle_plate: string | null;
+  vehicle_alias: string | null;
+  reservation_extras: Array<{
+    quantity: number;
+    extras: { name_es: string } | null;
+  }>;
 };
 
 function formatEuro(cents: number) {
@@ -85,7 +94,7 @@ export default function SuccessPage() {
           const { data: r } = await supabase
             .from('reservations')
             .select(
-              'id,start_date,end_date,total_amount_cents,payment_status,access_code',
+              'id,start_date,end_date,total_amount_cents,payment_status,access_code,full_name,vehicle_brand,vehicle_model,vehicle_plate,vehicle_alias,reservation_extras(quantity,extras(name_es))',
             )
             .eq('id', pay.reservation_id)
             .maybeSingle();
@@ -98,7 +107,7 @@ export default function SuccessPage() {
         const { data } = await supabase
           .from('reservations')
           .select(
-            'id,start_date,end_date,total_amount_cents,payment_status,access_code',
+            'id,start_date,end_date,total_amount_cents,payment_status,access_code,full_name,vehicle_brand,vehicle_model,vehicle_plate,vehicle_alias,reservation_extras(quantity,extras(name_es))',
           )
           .eq('checkout_session_id', session_id)
           .maybeSingle();
@@ -175,20 +184,54 @@ export default function SuccessPage() {
 
           {reservation && (
             <View style={styles.card}>
-              <Text style={styles.label}>Entrada</Text>
-              <Text style={styles.value}>
-                {formatDate(reservation.start_date)}
-              </Text>
+              <View style={styles.row}>
+                <Text style={styles.label}>Entrada</Text>
+                <Text style={styles.value}>{formatDate(reservation.start_date)}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.label}>Salida</Text>
+                <Text style={styles.value}>{formatDate(reservation.end_date)}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.label}>Total</Text>
+                <Text style={[styles.value, styles.valueHighlight]}>
+                  {formatEuro(reservation.total_amount_cents ?? 0)}
+                </Text>
+              </View>
 
-              <Text style={styles.label}>Salida</Text>
-              <Text style={styles.value}>
-                {formatDate(reservation.end_date)}
-              </Text>
+              <View style={styles.divider} />
 
-              <Text style={styles.label}>Total pagado</Text>
-              <Text style={styles.value}>
-                {formatEuro(reservation.total_amount_cents ?? 0)}
-              </Text>
+              {reservation.full_name && (
+                <View style={styles.row}>
+                  <Text style={styles.label}>Titular</Text>
+                  <Text style={styles.value} numberOfLines={1}>{reservation.full_name}</Text>
+                </View>
+              )}
+              {(reservation.vehicle_brand || reservation.vehicle_plate) && (
+                <View style={styles.row}>
+                  <Text style={styles.label}>Vehículo</Text>
+                  <Text style={styles.value} numberOfLines={1}>
+                    {[reservation.vehicle_alias ?? `${reservation.vehicle_brand ?? ''} ${reservation.vehicle_model ?? ''}`.trim(), reservation.vehicle_plate]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </Text>
+                </View>
+              )}
+              {reservation.reservation_extras.length > 0 && (
+                <View style={styles.row}>
+                  <Text style={styles.label}>Extras</Text>
+                  <Text style={styles.value} numberOfLines={2}>
+                    {reservation.reservation_extras
+                      .map((e) =>
+                        e.quantity > 1
+                          ? `${e.extras?.name_es} ×${e.quantity}`
+                          : e.extras?.name_es,
+                      )
+                      .filter(Boolean)
+                      .join(', ')}
+                  </Text>
+                </View>
+              )}
             </View>
           )}
 
@@ -234,13 +277,21 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     backgroundColor: '#fff',
-    padding: 20,
+    padding: 16,
     borderRadius: 16,
     elevation: 3,
-    gap: 4,
+    gap: 10,
   },
-  label: { fontSize: 13, color: '#888', marginTop: 8 },
-  value: { fontSize: 16, fontWeight: '600' },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  label: { fontSize: 13, color: '#888', flexShrink: 0 },
+  value: { fontSize: 14, fontWeight: '600', color: '#111', flexShrink: 1, textAlign: 'right' },
+  valueHighlight: { color: '#007AFF', fontSize: 15 },
+  divider: { height: 1, backgroundColor: '#f0f0f0' },
   primaryButton: {
     backgroundColor: '#007AFF',
     paddingVertical: 14,

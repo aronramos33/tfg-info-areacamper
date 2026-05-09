@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -33,6 +34,7 @@ export default function ServicesIndex() {
   const router = useRouter();
   const { isOwner } = useAuth();
 
+  const { height: screenHeight } = useWindowDimensions();
   const scrollRef = useRef<ScrollView | null>(null);
 
   // ✅ Posición Y de cada sección (guardada en refs)
@@ -194,7 +196,7 @@ export default function ServicesIndex() {
 
       <ScrollView
         ref={scrollRef}
-        contentContainerStyle={styles.container}
+        contentContainerStyle={[styles.container, { paddingBottom: screenHeight }]}
         onScroll={onScroll}
         onScrollEndDrag={(e) => updateTabFromY(e.nativeEvent.contentOffset.y)}
         onMomentumScrollEnd={(e) =>
@@ -291,7 +293,6 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 16,
     paddingTop: 8,
-    marginBottom: 300, // ← suficiente para que "exteriores" llegue al top
     gap: 12,
   },
 
