@@ -393,7 +393,7 @@ export default function CheckoutScreen() {
 
         {/* Selección de plaza */}
         <View style={card}>
-          <Text style={sectionTitle}>Elige tu plaza</Text>
+          <Text style={sectionTitle}>Elige tus plazas</Text>
           <Text style={{ color: '#666', fontSize: 13, marginBottom: 12 }}>
             {formatCents(nightlyCents)} × {nights} noche
             {nights !== 1 ? 's' : ''} × plaza
@@ -754,6 +754,13 @@ export default function CheckoutScreen() {
                   <Text style={{ color: '#555' }}>
                     {formatCents(extra.unit_amount_cents)} / noche
                   </Text>
+                  {extra.code === 'PERSON' && (
+                    <Text style={{ fontSize: 12, color: '#888', marginTop: 4, fontStyle: 'italic' }}>
+                      {numPlaces > 0
+                        ? `${numPlaces * 2} persona${numPlaces * 2 !== 1 ? 's' : ''} incluida${numPlaces * 2 !== 1 ? 's' : ''} (2 por plaza). Añade aquí el excedente.`
+                        : 'Incluye 2 personas por plaza. Añade solo las que superen ese límite.'}
+                    </Text>
+                  )}
                   {qty > 0 && (
                     <Text style={{ fontSize: 12, color: '#777', marginTop: 2 }}>
                       {toggle
