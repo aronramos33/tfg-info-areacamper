@@ -70,7 +70,7 @@ export default function AdminTabsLayout() {
       />
 
       <Tabs.Screen
-        name="profile/index"
+        name="profile"
         options={{
           title: 'Perfil',
           tabBarIcon: ({ color, size }) => (

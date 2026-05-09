@@ -1,327 +1,212 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
-  ActivityIndicator,
-  Button,
-  KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
-
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import { useRouter, useSegments } from 'expo-router';
+import Constants from 'expo-constants';
 import { useAuth } from '@/providers/AuthProvider';
 import RequireAuthCard from '@/components/RequireAuthCard';
 import { supabase } from '@/lib/supabase';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { useRouter } from 'expo-router';
+import { formatCents } from '@/components/utils/money';
 
-type UserProfileRow = {
-  user_id: string;
-  first_name: string | null;
-  last_name: string | null;
-  phone: string | null;
-  dni: string | null;
-};
-
-function normalizeSpaces(s: string) {
-  return s.replace(/\s+/g, ' ').trim();
-}
-function normalizeUpperAlnum(s: string) {
-  return s.replace(/[\s-]/g, '').toUpperCase().trim();
-}
-function normalizeDniNie(s: string) {
-  return normalizeUpperAlnum(s);
-}
-function normalizePhone(s: string) {
-  const trimmed = s.trim();
-  const hasPlus = trimmed.startsWith('+');
-  const digits = trimmed.replace(/[^\d]/g, '');
-  return hasPlus ? `+${digits}` : digits;
-}
-
-const DNI_LETTERS = 'TRWAGMYFPDXBNJZSQVHLCKE';
-
-function isValidDNI(dniRaw: string): boolean {
-  const dni = normalizeDniNie(dniRaw);
-  const m = dni.match(/^(\d{8})([A-Z])$/);
-  if (!m) return false;
-  return m[2] === DNI_LETTERS[parseInt(m[1], 10) % 23];
-}
-function isValidNIE(nieRaw: string): boolean {
-  const nie = normalizeDniNie(nieRaw);
-  const m = nie.match(/^([XYZ])(\d{7})([A-Z])$/);
-  if (!m) return false;
-  const prefixNum = m[1] === 'X' ? '0' : m[1] === 'Y' ? '1' : '2';
-  return m[3] === DNI_LETTERS[parseInt(prefixNum + m[2], 10) % 23];
-}
-function isValidDNINIE(value: string): boolean {
-  const v = normalizeDniNie(value);
-  if (!v) return true;
-  if (/^\d{8}[A-Z]$/.test(v)) return isValidDNI(v);
-  if (/^[XYZ]\d{7}[A-Z]$/.test(v)) return isValidNIE(v);
-  return false;
-}
-function isValidSpanishPhone(value: string): boolean {
-  const v = value.trim();
-  if (!v) return true;
-  let digits = v.replace(/[^\d]/g, '');
-  if (digits.startsWith('0034')) digits = digits.slice(4);
-  if (digits.startsWith('34') && digits.length === 11) digits = digits.slice(2);
-  if (!/^\d{9}$/.test(digits)) return false;
-  return /^[6789]/.test(digits);
-}
-
-async function fetchUserProfile(userId: string, metaFullName: string) {
-  const { data, error } = await supabase
-    .from('user_profiles')
-    .select('first_name, last_name, full_name, phone, dni')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (error) throw error;
-
-  const fallbackName = data?.full_name ?? metaFullName ?? '';
-  return {
-    first_name:
-      data?.first_name ??
-      (fallbackName ? fallbackName.split(' ')[0] : '') ??
-      '',
-    last_name:
-      data?.last_name ??
-      (fallbackName ? fallbackName.split(' ').slice(1).join(' ') : '') ??
-      '',
-    phone: data?.phone ?? '',
-    dni: data?.dni ?? '',
-  };
-}
+const LOCALE_LABELS: Record<string, string> = { es: 'Español', en: 'English' };
+const LOCALE_OPTIONS = Object.entries(LOCALE_LABELS) as [string, string][];
+const PRIVACY_URL = 'https://example.com/privacy';
 
 async function fetchVehicleCount(userId: string): Promise<number> {
   const { count, error } = await supabase
     .from('vehicles')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId);
-  if (error) {
-    console.warn('[fetchVehicleCount]', error);
-    return 0;
-  }
+  if (error) return 0;
   return count ?? 0;
 }
 
+async function fetchProfileMeta(userId: string): Promise<{ locale: string }> {
+  const { data } = await supabase
+    .from('user_profiles')
+    .select('preferred_locale')
+    .eq('user_id', userId)
+    .maybeSingle();
+  return { locale: data?.preferred_locale ?? 'es' };
+}
+
+async function fetchNightlyPrice(): Promise<number | null> {
+  const { data } = await supabase
+    .from('pricing')
+    .select('nightly_amount_cents')
+    .eq('active', true)
+    .maybeSingle();
+  return data?.nightly_amount_cents ?? null;
+}
+
+async function fetchExtrasCount(): Promise<number> {
+  const { count } = await supabase
+    .from('extras')
+    .select('id', { count: 'exact', head: true })
+    .eq('is_active', true);
+  return count ?? 0;
+}
+
+// ── SettingsRow ──────────────────────────────────────────────────────────────
+
+type SettingsRowProps = {
+  icon: string;
+  label: string;
+  value?: string;
+  onPress?: () => void;
+  showChevron?: boolean;
+  destructive?: boolean;
+};
+
+function SettingsRow({
+  icon,
+  label,
+  value,
+  onPress,
+  showChevron = true,
+  destructive = false,
+}: SettingsRowProps) {
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.row,
+        pressed && onPress && { backgroundColor: '#f0f0f0' },
+      ]}
+      onPress={onPress}
+      disabled={!onPress}
+    >
+      <View style={styles.rowLeft}>
+        <Text style={styles.rowIcon}>{icon}</Text>
+        <Text style={[styles.rowLabel, destructive && styles.destructiveLabel]}>
+          {label}
+        </Text>
+      </View>
+      <View style={styles.rowRight}>
+        {value ? <Text style={styles.rowValue}>{value}</Text> : null}
+        {showChevron && onPress ? (
+          <Text style={styles.rowChevron}>›</Text>
+        ) : null}
+      </View>
+    </Pressable>
+  );
+}
+
+function SectionLabel({ label }: { label: string }) {
+  return <Text style={styles.sectionLabel}>{label}</Text>;
+}
+
+function SectionGroup({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: object;
+}) {
+  return <View style={[styles.sectionGroup, style]}>{children}</View>;
+}
+
+function RowDivider() {
+  return <View style={styles.rowDivider} />;
+}
+
+// ── Screen ───────────────────────────────────────────────────────────────────
+
 export default function ProfileIndex() {
   const { session, signOut, isOwner } = useAuth();
-  const user = session?.user;
-  const navigation = useNavigation<any>();
   const router = useRouter();
+  const segments = useSegments();
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [dni, setDni] = useState('');
-  const [phone, setPhone] = useState('');
   const [vehicleCount, setVehicleCount] = useState<number | null>(null);
+  const [locale, setLocale] = useState('es');
+  const [loadingMeta, setLoadingMeta] = useState(true);
+  const [showLocaleOptions, setShowLocaleOptions] = useState(false);
+  const [nightlyCents, setNightlyCents] = useState<number | null>(null);
+  const [extrasCount, setExtrasCount] = useState<number | null>(null);
 
-  const [showPasswordSection, setShowPasswordSection] = useState(false);
-  const [newPassword, setNewPassword] = useState('');
-  const [repeatPassword, setRepeatPassword] = useState('');
-  const [changingPassword, setChangingPassword] = useState(false);
+  const user = session?.user;
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [showEditButton, setShowEditButton] = useState(false);
+  const isAdmin = (segments as string[]).includes('admin');
+  const profileBase = isAdmin ? '/admin/profile' : '/(main)/profile';
 
-  const initialRef = useRef<{
-    first_name: string;
-    last_name: string;
-    dni: string;
-    phone: string;
-  } | null>(null);
-  const isEditingRef = useRef(false);
+  const displayName = useMemo(() => {
+    const full = user?.user_metadata?.full_name as string | undefined;
+    if (full?.trim()) return full.trim();
+    return user?.email?.split('@')[0] ?? '—';
+  }, [user]);
 
-  useEffect(() => {
-    isEditingRef.current = isEditing;
-  }, [isEditing]);
+  const initials = useMemo(() => {
+    const parts = displayName.split(' ').filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return '?';
+  }, [displayName]);
 
-  const provider = useMemo(() => {
+  const isEmailProvider = useMemo(() => {
     const p1 = user?.app_metadata?.provider as string | undefined;
     const p2 = Array.isArray(user?.app_metadata?.providers)
       ? (user?.app_metadata?.providers?.[0] as string | undefined)
       : undefined;
-    return p1 ?? p2 ?? 'unknown';
+    return (p1 ?? p2 ?? 'unknown') === 'email';
   }, [user?.app_metadata]);
 
-  const isEmailProvider = provider === 'email';
-
   useEffect(() => {
-    const unsub = navigation.addListener('beforeRemove', (e: any) => {
-      if (!isEditingRef.current) return;
-      e.preventDefault();
-      Alert.alert('Cambios sin guardar', 'Tienes cambios sin guardar.', [
-        { text: 'Seguir editando', style: 'cancel' },
-        {
-          text: 'Descartar',
-          style: 'destructive',
-          onPress: () => navigation.dispatch(e.data.action),
-        },
-      ]);
-    });
-    return unsub;
-  }, [navigation]);
-
-  const applyLoaded = (loaded: {
-    first_name: string;
-    last_name: string;
-    dni: string;
-    phone: string;
-  }) => {
-    setFirstName(loaded.first_name);
-    setLastName(loaded.last_name);
-    setDni(loaded.dni);
-    setPhone(loaded.phone);
-    initialRef.current = loaded;
-    const any = Boolean(
-      loaded.first_name || loaded.last_name || loaded.dni || loaded.phone,
-    );
-    setShowEditButton(any);
-    setIsEditing(!any);
-  };
-
-  const rollbackToSnapshot = () => {
-    const snap = initialRef.current;
-    if (!snap) {
-      setIsEditing(false);
-      return;
-    }
-    setFirstName(snap.first_name);
-    setLastName(snap.last_name);
-    setDni(snap.dni);
-    setPhone(snap.phone);
-    const any = Boolean(
-      snap.first_name || snap.last_name || snap.dni || snap.phone,
-    );
-    setShowEditButton(any);
-    setIsEditing(!any);
-  };
-
-  useEffect(() => {
-    if (!session?.user?.id) return;
+    if (!user?.id) return;
     void (async () => {
-      if (isEditingRef.current) return;
-      setLoading(true);
+      setLoadingMeta(true);
       try {
-        const meta =
-          (user?.user_metadata?.full_name as string | undefined) ?? '';
-        const [profile, vCount] = await Promise.all([
-          fetchUserProfile(session.user.id, meta),
-          fetchVehicleCount(session.user.id),
+        const [base, admin] = await Promise.all([
+          Promise.all([fetchProfileMeta(user.id), fetchVehicleCount(user.id)]),
+          isAdmin
+            ? Promise.all([fetchNightlyPrice(), fetchExtrasCount()])
+            : Promise.resolve([null, null] as [null, null]),
         ]);
-        applyLoaded(profile);
-        setVehicleCount(vCount);
-      } catch {
-        applyLoaded({ first_name: '', last_name: '', phone: '', dni: '' });
-        setVehicleCount(0);
+        const [meta, count] = base;
+        setLocale(meta.locale);
+        setVehicleCount(count);
+        if (isAdmin) {
+          setNightlyCents(admin[0]);
+          setExtrasCount(admin[1] as number);
+        }
       } finally {
-        setLoading(false);
+        setLoadingMeta(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user?.id]);
+  }, [user?.id, isAdmin]);
 
   useFocusEffect(
     React.useCallback(() => {
-      const uid = session?.user?.id;
-      if (!uid) return;
-      void fetchVehicleCount(uid).then(setVehicleCount);
-    }, [session?.user?.id]),
+      if (!user?.id) return;
+      const refreshes: Promise<unknown>[] = [
+        fetchVehicleCount(user.id).then(setVehicleCount),
+      ];
+      if (isAdmin) {
+        refreshes.push(fetchNightlyPrice().then((v) => v != null && setNightlyCents(v)));
+        refreshes.push(fetchExtrasCount().then(setExtrasCount));
+      }
+      void Promise.all(refreshes);
+    }, [user?.id, isAdmin]),
   );
 
-  const handleSaveProfile = async () => {
-    if (!user) return;
-
-    const normalizedFirst = normalizeSpaces(firstName);
-    const normalizedLast = normalizeSpaces(lastName);
-    const normalizedDni = normalizeDniNie(dni);
-    const normalizedPhone = normalizePhone(phone);
-
-    setFirstName(normalizedFirst);
-    setLastName(normalizedLast);
-    setDni(normalizedDni);
-    setPhone(normalizedPhone);
-
-    if (normalizedFirst && normalizedFirst.length < 2) {
-      Alert.alert('Nombre inválido', 'El nombre es demasiado corto.');
-      return;
-    }
-    if (!isValidDNINIE(normalizedDni)) {
-      Alert.alert('DNI/NIE inválido', 'Revisa el formato y la letra.');
-      return;
-    }
-    if (!isValidSpanishPhone(normalizedPhone)) {
-      Alert.alert('Teléfono inválido', 'Introduce un teléfono español válido.');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const { error } = await supabase.from('user_profiles').upsert(
-        {
-          user_id: user.id,
-          first_name: normalizedFirst || null,
-          last_name: normalizedLast || null,
-          phone: normalizedPhone || null,
-          dni: normalizedDni || null,
-        } as UserProfileRow,
+  const handleLocaleSelect = async (newLocale: string) => {
+    setShowLocaleOptions(false);
+    if (!user?.id || newLocale === locale) return;
+    setLocale(newLocale);
+    await supabase
+      .from('user_profiles')
+      .upsert(
+        { user_id: user.id, preferred_locale: newLocale },
         { onConflict: 'user_id' },
       );
-
-      if (error) throw error;
-
-      const fullName = [normalizedFirst, normalizedLast]
-        .filter(Boolean)
-        .join(' ');
-      if (fullName)
-        await supabase.auth.updateUser({ data: { full_name: fullName } });
-
-      const meta = (user.user_metadata?.full_name as string | undefined) ?? '';
-      applyLoaded(await fetchUserProfile(user.id, meta));
-      Alert.alert('Guardado', 'Tus datos se han actualizado correctamente.');
-    } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'No se pudo guardar el perfil.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleChangePassword = async () => {
-    if (!user?.email || !isEmailProvider) return;
-    const p1 = newPassword.trim();
-    const p2 = repeatPassword.trim();
-    if (p1.length < 8) {
-      Alert.alert('Contraseña débil', 'Usa al menos 8 caracteres.');
-      return;
-    }
-    if (p1 !== p2) {
-      Alert.alert('No coincide', 'Las contraseñas no coinciden.');
-      return;
-    }
-    setChangingPassword(true);
-    try {
-      const { error } = await supabase.auth.updateUser({ password: p1 });
-      if (error) throw error;
-      setNewPassword('');
-      setRepeatPassword('');
-      setShowPasswordSection(false);
-      Alert.alert('Listo', 'Tu contraseña se ha cambiado correctamente.');
-    } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'No se pudo cambiar la contraseña.');
-    } finally {
-      setChangingPassword(false);
-    }
   };
 
   const handleSignOut = () => {
@@ -331,278 +216,252 @@ export default function ProfileIndex() {
     ]);
   };
 
+  const vehicleSubtitle =
+    vehicleCount === null
+      ? '—'
+      : vehicleCount === 0
+        ? 'Ninguno añadido'
+        : `${vehicleCount} ${vehicleCount === 1 ? 'guardado' : 'guardados'}`;
+
   if (!session) return <RequireAuthCard />;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.select({ ios: 'padding', android: undefined })}
-      >
-        <ScrollView
-          contentContainerStyle={styles.container}
-          keyboardShouldPersistTaps="handled"
-        >
-          <Text style={styles.title}>Perfil</Text>
+      <ScrollView contentContainerStyle={styles.container}>
 
-          {/* ── Cuenta ── */}
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Tu cuenta</Text>
-            <Text style={styles.label}>Email</Text>
-            <Text style={styles.value}>{session.user.email ?? '—'}</Text>
-            {isOwner && <Text style={styles.ownerBadge}>Propietario ✅</Text>}
-            <Text style={styles.userId}>ID: {session.user.id}</Text>
+        {/* ── Cabecera de perfil ── */}
+        <View style={styles.profileHeader}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{initials}</Text>
           </View>
-
-          {/* ── Datos personales ── */}
-          <View style={styles.card}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Datos personales</Text>
-              {showEditButton && (
-                <Pressable
-                  onPress={() => setIsEditing(true)}
-                  disabled={isEditing}
-                  style={[styles.editBtn, isEditing && { opacity: 0.4 }]}
-                >
-                  <Text style={styles.editBtnText}>✏️</Text>
-                </Pressable>
-              )}
-            </View>
-
-            {loading ? (
-              <View style={styles.loadingRow}>
-                <ActivityIndicator />
-                <Text style={{ marginLeft: 10 }}>Cargando datos…</Text>
-              </View>
-            ) : (
-              <>
-                <Text style={styles.label}>Nombre</Text>
-                {isEditing ? (
-                  <TextInput
-                    value={firstName}
-                    onChangeText={setFirstName}
-                    placeholder="Nombre"
-                    style={styles.input}
-                    autoCapitalize="words"
-                  />
-                ) : (
-                  <Text style={styles.value}>{firstName || '—'}</Text>
-                )}
-
-                <Text style={styles.label}>Apellidos</Text>
-                {isEditing ? (
-                  <TextInput
-                    value={lastName}
-                    onChangeText={setLastName}
-                    placeholder="Apellidos"
-                    style={styles.input}
-                    autoCapitalize="words"
-                  />
-                ) : (
-                  <Text style={styles.value}>{lastName || '—'}</Text>
-                )}
-
-                <Text style={styles.label}>DNI / NIE</Text>
-                {isEditing ? (
-                  <TextInput
-                    value={dni}
-                    onChangeText={setDni}
-                    placeholder="12345678Z"
-                    style={styles.input}
-                    autoCapitalize="characters"
-                  />
-                ) : (
-                  <Text style={styles.value}>{dni || '—'}</Text>
-                )}
-
-                <Text style={styles.label}>Teléfono</Text>
-                {isEditing ? (
-                  <TextInput
-                    value={phone}
-                    onChangeText={setPhone}
-                    placeholder="+34 600 000 000"
-                    style={styles.input}
-                    keyboardType="phone-pad"
-                  />
-                ) : (
-                  <Text style={styles.value}>{phone || '—'}</Text>
-                )}
-
-                {isEditing && (
-                  <View style={[styles.rowButtons, { marginTop: 12 }]}>
-                    <View style={styles.flex}>
-                      <Button
-                        title="Cancelar"
-                        onPress={rollbackToSnapshot}
-                        disabled={saving}
-                      />
-                    </View>
-                    <View style={{ width: 10 }} />
-                    <View style={styles.flex}>
-                      <Button
-                        title={saving ? 'Guardando…' : 'Guardar'}
-                        onPress={handleSaveProfile}
-                        disabled={saving}
-                      />
-                    </View>
-                  </View>
-                )}
-              </>
-            )}
+          <View style={styles.profileInfo}>
+            <Text style={styles.profileName}>{displayName}</Text>
+            <Text style={styles.profileEmail}>{user?.email ?? '—'}</Text>
+            {isOwner && <Text style={styles.ownerBadge}>Propietario ✓</Text>}
           </View>
+        </View>
 
-          {/* ── Mis vehículos ── */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.card,
-              styles.vehiclesCard,
-              pressed && { opacity: 0.7 },
-            ]}
-            onPress={() => router.push('/(main)/profile/vehicles')}
-          >
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Mis vehículos</Text>
-              <Text style={styles.chevron}>›</Text>
-            </View>
-            <Text style={styles.value}>
-              {vehicleCount === null
-                ? '—'
-                : vehicleCount === 0
-                  ? 'Aún no has añadido ningún vehículo'
-                  : `${vehicleCount} ${vehicleCount === 1 ? 'vehículo guardado' : 'vehículos guardados'}`}
-            </Text>
-          </Pressable>
-
-          {/* ── Seguridad ── */}
-          {isEmailProvider ? (
-            <View style={styles.card}>
-              <Pressable
-                style={styles.sectionHeaderRow}
-                onPress={() => setShowPasswordSection((v) => !v)}
-              >
-                <Text style={styles.sectionTitle}>Seguridad</Text>
-                <Text style={styles.chevron}>
-                  {showPasswordSection ? '▲' : '▼'}
-                </Text>
-              </Pressable>
-
-              {showPasswordSection && (
-                <>
-                  <Text style={styles.label}>Nueva contraseña</Text>
-                  <TextInput
-                    value={newPassword}
-                    onChangeText={setNewPassword}
-                    placeholder="Mínimo 8 caracteres"
-                    style={styles.input}
-                    secureTextEntry
-                    autoCapitalize="none"
-                  />
-                  <Text style={styles.label}>Repetir contraseña</Text>
-                  <TextInput
-                    value={repeatPassword}
-                    onChangeText={setRepeatPassword}
-                    placeholder="Repite la nueva contraseña"
-                    style={styles.input}
-                    secureTextEntry
-                    autoCapitalize="none"
-                  />
-                  <View style={{ marginTop: 8 }}>
-                    <Button
-                      title={
-                        changingPassword ? 'Cambiando…' : 'Cambiar contraseña'
-                      }
-                      onPress={handleChangePassword}
-                      disabled={changingPassword}
-                    />
-                  </View>
-                </>
-              )}
-            </View>
-          ) : (
-            <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Seguridad</Text>
-              <Text style={[styles.value, { marginTop: 8 }]}>
-                Tu cuenta está vinculada con Google. Para cambiar tu contraseña,
-                hazlo desde tu cuenta de Google.
-              </Text>
-            </View>
+        {/* ── CUENTA ── */}
+        <SectionLabel label="CUENTA" />
+        <SectionGroup>
+          <SettingsRow
+            icon="👤"
+            label="Datos personales"
+            onPress={() => router.push(`${profileBase}/edit` as any)}
+          />
+          {!isAdmin && (
+            <>
+              <RowDivider />
+              <SettingsRow
+                icon="🚗"
+                label="Mis vehículos"
+                value={loadingMeta ? '…' : vehicleSubtitle}
+                onPress={() => router.push(`${profileBase}/vehicles` as any)}
+              />
+            </>
           )}
+        </SectionGroup>
 
-          {/* ── Cerrar sesión ── */}
-          <View style={styles.logoutWrap}>
-            <Button
-              title="Cerrar sesión"
-              onPress={handleSignOut}
-              color="#ff4444"
-            />
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        {/* ── MI ÁREA (solo admin) ── */}
+        {isAdmin && (
+          <>
+            <SectionLabel label="MI ÁREA" />
+            <SectionGroup>
+              <SettingsRow
+                icon="💶"
+                label="Precio por noche"
+                value={
+                  loadingMeta
+                    ? '…'
+                    : nightlyCents != null
+                      ? formatCents(nightlyCents)
+                      : '—'
+                }
+                onPress={() => router.push(`${profileBase}/pricing` as any)}
+              />
+              <RowDivider />
+              <SettingsRow
+                icon="⚡"
+                label="Extras"
+                value={
+                  loadingMeta
+                    ? '…'
+                    : extrasCount != null
+                      ? `${extrasCount} activo${extrasCount !== 1 ? 's' : ''}`
+                      : '—'
+                }
+                onPress={() => router.push(`${profileBase}/extras` as any)}
+              />
+            </SectionGroup>
+          </>
+        )}
+
+        {/* ── SEGURIDAD ── */}
+        {isEmailProvider && (
+          <>
+            <SectionLabel label="SEGURIDAD" />
+            <SectionGroup>
+              <SettingsRow
+                icon="🔒"
+                label="Contraseña"
+                onPress={() => router.push(`${profileBase}/password` as any)}
+              />
+            </SectionGroup>
+          </>
+        )}
+
+        {/* ── APLICACIÓN ── */}
+        <SectionLabel label="APLICACIÓN" />
+        <SectionGroup>
+          <SettingsRow
+            icon="🌐"
+            label="Idioma"
+            value={
+              loadingMeta
+                ? '…'
+                : `${LOCALE_LABELS[locale] ?? locale}  ${showLocaleOptions ? '▲' : '▼'}`
+            }
+            onPress={() => setShowLocaleOptions((v) => !v)}
+            showChevron={false}
+          />
+          {showLocaleOptions &&
+            LOCALE_OPTIONS.map(([code, name], i) => (
+              <React.Fragment key={code}>
+                <RowDivider />
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.localeRow,
+                    pressed && { backgroundColor: '#f0f0f0' },
+                  ]}
+                  onPress={() => handleLocaleSelect(code)}
+                >
+                  <Text
+                    style={[
+                      styles.localeRowText,
+                      locale === code && styles.localeRowSelected,
+                    ]}
+                  >
+                    {name}
+                  </Text>
+                  {locale === code && (
+                    <Text style={styles.localeCheck}>✓</Text>
+                  )}
+                </Pressable>
+              </React.Fragment>
+            ))}
+          <RowDivider />
+          <SettingsRow
+            icon="📄"
+            label="Política y privacidad"
+            onPress={() => Linking.openURL(PRIVACY_URL)}
+          />
+        </SectionGroup>
+
+        {/* ── Cerrar sesión ── */}
+        <SectionGroup style={{ marginTop: 32 }}>
+          <SettingsRow
+            icon="🚪"
+            label="Cerrar sesión"
+            onPress={handleSignOut}
+            showChevron={false}
+            destructive
+          />
+        </SectionGroup>
+
+        {/* ── Versión ── */}
+        <Text style={styles.version}>
+          Versión {Constants.expoConfig?.version ?? '—'}
+        </Text>
+
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
-  flex: { flex: 1 },
-  container: { padding: 16, paddingBottom: 40, gap: 14 },
-  title: { fontSize: 28, fontWeight: 'bold', marginTop: 8, marginBottom: 6 },
+  safe: { flex: 1, backgroundColor: '#f2f2f7' },
+  container: { paddingBottom: 48 },
 
-  card: {
-    width: '100%',
-    padding: 16,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    gap: 4,
-  },
-  sectionHeaderRow: {
+  profileHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    gap: 16,
   },
-  sectionTitle: { fontSize: 18, fontWeight: '700' },
-
-  userId: {
-    fontSize: 11,
-    color: '#ccc',
-    marginTop: 10,
-    fontFamily: Platform.select({ ios: 'Courier', android: 'monospace' }),
-  },
-  ownerBadge: { marginTop: 6, color: 'green', fontWeight: '600' },
-
-  editBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#eaeaea',
+  avatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#007AFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  editBtnText: { fontSize: 16 },
-  chevron: { fontSize: 14, color: '#888', fontWeight: '700' },
+  avatarText: { color: '#fff', fontSize: 24, fontWeight: '700' },
+  profileInfo: { flex: 1, gap: 2 },
+  profileName: { fontSize: 20, fontWeight: '700', color: '#111' },
+  profileEmail: { fontSize: 14, color: '#888' },
+  ownerBadge: { fontSize: 13, color: '#34C759', fontWeight: '600', marginTop: 4 },
 
-  label: { fontSize: 13, fontWeight: '600', color: '#888', marginTop: 10 },
-  value: { fontSize: 16, color: '#111', marginTop: 2 },
-
-  input: {
-    backgroundColor: 'white',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: Platform.select({ ios: 12, android: 10 }),
-    fontSize: 16,
-    marginTop: 4,
-    color: '#111',
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8e8e93',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginTop: 24,
+    marginBottom: 6,
+    marginHorizontal: 20,
+  },
+  sectionGroup: {
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    borderRadius: 12,
+    overflow: 'hidden',
   },
 
-  loadingRow: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
-  rowButtons: { flexDirection: 'row', alignItems: 'center' },
-  logoutWrap: { marginTop: 4 },
-  vehiclesCard: { gap: 6 },
+  rowLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  rowIcon: { fontSize: 18, width: 26, textAlign: 'center' },
+  rowLabel: { fontSize: 16, color: '#111' },
+  destructiveLabel: { color: '#ff3b30' },
+  rowRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  rowValue: { fontSize: 15, color: '#8e8e93' },
+  rowChevron: {
+    fontSize: 18,
+    color: '#c7c7cc',
+    fontWeight: '600',
+    ...Platform.select({ android: { lineHeight: 22 } }),
+  },
+  rowDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#e0e0e0',
+    marginLeft: 54,
+  },
+
+  localeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    paddingLeft: 54,
+  },
+  localeRowText: { fontSize: 16, color: '#111' },
+  localeRowSelected: { color: '#007AFF', fontWeight: '600' },
+  localeCheck: { fontSize: 16, color: '#007AFF', fontWeight: '700' },
+
+  version: {
+    textAlign: 'center',
+    fontSize: 13,
+    color: '#c7c7cc',
+    marginTop: 28,
+  },
 });
