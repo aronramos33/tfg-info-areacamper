@@ -42,6 +42,8 @@ type Extra = {
   pricing_type: 'per_night' | string;
 };
 
+type Place = { id: number; name: string };
+
 const EXTRA_ORDER: Record<string, number> = { PERSON: 0, PET: 1, POWER: 2 };
 
 export default function CheckoutScreen() {
@@ -84,7 +86,17 @@ export default function CheckoutScreen() {
   const [extraQuantities, setExtraQuantities] = useState<
     Record<number, number>
   >({});
-  const [numPlaces, setNumPlaces] = useState(1);
+
+  // Place selection state (replaces numPlaces stepper)
+  const [allPlaces, setAllPlaces] = useState<Place[]>([]);
+  const [occupiedPlaceIds, setOccupiedPlaceIds] = useState<Set<number>>(
+    new Set(),
+  );
+  const [selectedPlaceIds, setSelectedPlaceIds] = useState<number[]>([]);
+  const [placesLoading, setPlacesLoading] = useState(true);
+
+  const numPlaces = selectedPlaceIds.length;
+
   const [nightlyCents, setNightlyCents] = useState<number>(NIGHTLY_CENTS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -100,7 +112,6 @@ export default function CheckoutScreen() {
   const isToggle = (e: Extra) => e.code === 'POWER';
   const maxUnits = (e: Extra) => (isToggle(e) ? 1 : 4);
 
-  // Fuera del componente, como función pura (sin dependencias de hooks)
   function calcLineTotal(
     units: number,
     nights: number,
@@ -125,25 +136,58 @@ export default function CheckoutScreen() {
   useEffect(() => {
     if (!session?.user?.id) {
       setLoading(false);
+      setPlacesLoading(false);
       return;
     }
 
     const loadData = async () => {
       try {
-        const { data: pricingData } = await supabase
-          .from('pricing')
-          .select('nightly_amount_cents')
-          .eq('active', true)
-          .single();
+        const [
+          pricingRes,
+          profileRes,
+          vehiclesRes,
+          extrasRes,
+          placesRes,
+          occupiedRes,
+        ] = await Promise.all([
+          supabase
+            .from('pricing')
+            .select('nightly_amount_cents')
+            .eq('active', true)
+            .single(),
+          supabase
+            .from('user_profiles')
+            .select('full_name, phone, dni')
+            .eq('user_id', session.user.id)
+            .single(),
+          supabase
+            .from('vehicles')
+            .select('*')
+            .eq('user_id', session.user.id)
+            .order('created_at', { ascending: true }),
+          supabase
+            .from('extras')
+            .select('id, code, name_es, unit_amount_cents, is_active, pricing_type')
+            .eq('is_active', true)
+            .order('id'),
+          supabase
+            .from('places')
+            .select('id, name')
+            .eq('is_active', true)
+            .order('id'),
+          supabase
+            .from('reservations')
+            .select('place_ids')
+            .neq('status', 'cancelled')
+            .eq('payment_status', 'paid')
+            .lt('start_date', endDate)
+            .gt('end_date', startDate),
+        ]);
 
-        if (pricingData) setNightlyCents(pricingData.nightly_amount_cents);
+        if (pricingRes.data)
+          setNightlyCents(pricingRes.data.nightly_amount_cents);
 
-        const { data: profileData } = await supabase
-          .from('user_profiles')
-          .select('full_name, phone, dni')
-          .eq('user_id', session.user.id)
-          .single();
-
+        const profileData = profileRes.data;
         let fullName = profileData?.full_name ?? '';
         if (!fullName) {
           const meta = session.user.user_metadata;
@@ -151,50 +195,45 @@ export default function CheckoutScreen() {
           const last = (meta?.last_name ?? meta?.family_name ?? '') as string;
           fullName = [first, last].filter(Boolean).join(' ');
         }
-
         setProfile(
           profileData ? { ...profileData, full_name: fullName } : null,
         );
-
         setForm({
           full_name: fullName ?? '',
           dni: profileData?.dni ?? '',
           phone: profileData?.phone ?? '',
         });
 
-        const { data: vehiclesData } = await supabase
-          .from('vehicles')
-          .select('*')
-          .eq('user_id', session.user.id)
-          .order('created_at', { ascending: true });
-
-        const vList = (vehiclesData ?? []) as Vehicle[];
+        const vList = (vehiclesRes.data ?? []) as Vehicle[];
         setVehicles(vList);
         if (vList.length === 1) setSelectedVehicleId(vList[0].id);
 
-        const { data: extrasData } = await supabase
-          .from('extras')
-          .select(
-            'id, code, name_es, unit_amount_cents, is_active, pricing_type',
-          )
-          .eq('is_active', true)
-          .order('id');
-
-        if (extrasData) {
-          const sorted = [...(extrasData as Extra[])].sort(
+        if (extrasRes.data) {
+          const sorted = [...(extrasRes.data as Extra[])].sort(
             (a, b) => (EXTRA_ORDER[a.code] ?? 9) - (EXTRA_ORDER[b.code] ?? 9),
           );
           setExtras(sorted);
         }
+
+        setAllPlaces((placesRes.data ?? []) as Place[]);
+
+        const occupied = new Set<number>();
+        for (const r of occupiedRes.data ?? []) {
+          for (const pid of (r.place_ids as number[]) ?? []) {
+            occupied.add(pid);
+          }
+        }
+        setOccupiedPlaceIds(occupied);
       } catch (e) {
         console.warn(e);
       } finally {
         setLoading(false);
+        setPlacesLoading(false);
       }
     };
 
     loadData();
-  }, [session?.user?.id, session?.user?.user_metadata]);
+  }, [session?.user?.id, session?.user?.user_metadata, startDate, endDate]);
 
   if (!session) return <RequireAuthCard />;
   if (loading)
@@ -217,6 +256,14 @@ export default function CheckoutScreen() {
   const handleConfirm = async () => {
     if (!start || !end || nights <= 0) {
       Alert.alert('Fechas no válidas', 'Vuelve a seleccionar tus fechas.');
+      return;
+    }
+
+    if (selectedPlaceIds.length === 0) {
+      Alert.alert(
+        'Elige una plaza',
+        'Selecciona al menos una plaza para continuar.',
+      );
       return;
     }
 
@@ -279,7 +326,8 @@ export default function CheckoutScreen() {
           body: {
             start_date: startDate,
             end_date: endDate,
-            num_places: numPlaces,
+            num_places: selectedPlaceIds.length,
+            place_ids: selectedPlaceIds,
             full_name: fullNameToUse,
             phone: phoneToUse,
             dni: dniToUse,
@@ -343,40 +391,87 @@ export default function CheckoutScreen() {
           <Text>Precio por noche: {formatCents(nightlyCents)}</Text>
         </View>
 
-        {/* Número de plazas */}
+        {/* Selección de plaza */}
         <View style={card}>
-          <Text style={sectionTitle}>Número de plazas</Text>
+          <Text style={sectionTitle}>Elige tu plaza</Text>
           <Text style={{ color: '#666', fontSize: 13, marginBottom: 12 }}>
             {formatCents(nightlyCents)} × {nights} noche
             {nights !== 1 ? 's' : ''} × plaza
           </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <Pressable
-              onPress={() => setNumPlaces((n) => Math.max(1, n - 1))}
-              style={counterBtn}
-            >
-              <Text style={counterBtnText}>−</Text>
-            </Pressable>
-            <Text
-              style={{
-                fontSize: 26,
-                fontWeight: '800',
-                minWidth: 32,
-                textAlign: 'center',
-              }}
-            >
-              {numPlaces}
+
+          {placesLoading ? (
+            <ActivityIndicator style={{ marginVertical: 12 }} />
+          ) : (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+              {allPlaces.map((place) => {
+                const occupied = occupiedPlaceIds.has(place.id);
+                const selected = selectedPlaceIds.includes(place.id);
+                return (
+                  <Pressable
+                    key={place.id}
+                    disabled={occupied}
+                    onPress={() =>
+                      setSelectedPlaceIds((prev) =>
+                        prev.includes(place.id)
+                          ? prev.filter((id) => id !== place.id)
+                          : [...prev, place.id],
+                      )
+                    }
+                    style={{
+                      width: '30%',
+                      paddingVertical: 14,
+                      borderRadius: 12,
+                      borderWidth: 2,
+                      borderColor: occupied
+                        ? '#E5E7EB'
+                        : selected
+                          ? '#1A73E8'
+                          : '#D1D5DB',
+                      backgroundColor: occupied
+                        ? '#F3F4F6'
+                        : selected
+                          ? '#EAF1FE'
+                          : '#fff',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontWeight: '700',
+                        fontSize: 15,
+                        color: occupied
+                          ? '#9CA3AF'
+                          : selected
+                            ? '#1A73E8'
+                            : '#111',
+                      }}
+                    >
+                      {place.name}
+                    </Text>
+                    {occupied && (
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          color: '#9CA3AF',
+                          marginTop: 2,
+                        }}
+                      >
+                        Ocupada
+                      </Text>
+                    )}
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+
+          {selectedPlaceIds.length > 0 && (
+            <Text style={{ marginTop: 12, color: '#333', fontWeight: '600' }}>
+              {selectedPlaceIds.length} plaza
+              {selectedPlaceIds.length !== 1 ? 's' : ''} →{' '}
+              {formatCents(nights * nightlyCents * selectedPlaceIds.length)}
             </Text>
-            <Pressable
-              onPress={() => setNumPlaces((n) => n + 1)}
-              style={counterBtn}
-            >
-              <Text style={counterBtnText}>+</Text>
-            </Pressable>
-            <Text style={{ color: '#666', fontSize: 14 }}>
-              = {formatCents(nights * nightlyCents * numPlaces)}
-            </Text>
-          </View>
+          )}
         </View>
 
         {/* Tus datos */}
@@ -805,15 +900,6 @@ const sectionTitle = {
   fontWeight: '600' as const,
   marginBottom: 8,
 };
-const counterBtn = {
-  width: 40,
-  height: 40,
-  borderRadius: 10,
-  backgroundColor: '#F2F4F8',
-  alignItems: 'center' as const,
-  justifyContent: 'center' as const,
-};
-const counterBtnText = { fontSize: 22, fontWeight: '800' as const };
 const smallBtn = {
   width: 34,
   height: 34,

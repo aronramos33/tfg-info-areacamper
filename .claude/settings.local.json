@@ -26,7 +26,9 @@
       "Bash(mv \"[reservationId].tsx\" \"[reservationId]/index.tsx\")",
       "Bash(npx expo *)",
       "Bash(npm uninstall *)",
-      "Bash(del *)"
+      "Bash(del *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\aronr\\\\Documents\\\\tfg-info-areacamper\" -Recurse -Include \"*.ts\" -Path \"*supabase*functions*\")",
+      "Bash(Select-Object FullName)"
     ]
   }
 }
