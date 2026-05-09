@@ -29,6 +29,13 @@ export default {
       '@react-native-google-signin/google-signin',
       '@react-native-community/datetimepicker',
       'expo-web-browser',
+      [
+        'expo-image-picker',
+        {
+          photosPermission:
+            'Permite seleccionar imágenes para los servicios del área',
+        },
+      ],
     ],
     extra: {
       // ⚠️ REEMPLAZA ESTAS VARIABLES CON LAS DE TU PROYECTO SUPABASE

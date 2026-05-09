@@ -181,10 +181,7 @@ export default function AdminMapaPlazas() {
     return maintenanceBlocks.filter((b) => {
       const s = dayjs(b.starts_on);
       const e = dayjs(b.ends_on).endOf('day');
-      return (
-        s.isBefore(periodEnd.add(1, 'day')) &&
-        e.isAfter(periodStart.subtract(1, 'day'))
-      );
+      return !s.isAfter(periodEnd) && !e.isBefore(periodStart);
     });
   }, [maintenanceBlocks, periodStart, periodEnd]);
 
@@ -192,10 +189,7 @@ export default function AdminMapaPlazas() {
     return reservations.filter((r) => {
       const s = dayjs(r.start_date);
       const e = dayjs(r.end_date).endOf('day');
-      return (
-        s.isBefore(periodEnd.add(1, 'day')) &&
-        e.isAfter(periodStart.subtract(1, 'day'))
-      );
+      return !s.isAfter(periodEnd) && !e.isBefore(periodStart);
     });
   }, [reservations, periodStart, periodEnd]);
 

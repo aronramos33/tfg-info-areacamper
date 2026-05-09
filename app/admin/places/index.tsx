@@ -233,10 +233,7 @@ export default function AdminDashboard() {
     return reservations.filter((r) => {
       const rStart = dayjs(r.start_date);
       const rEnd = dayjs(r.end_date).endOf('day');
-      return (
-        rStart.isBefore(periodEnd.add(1, 'day')) &&
-        rEnd.isAfter(periodStart.subtract(1, 'day'))
-      );
+      return !rStart.isAfter(periodEnd) && !rEnd.isBefore(periodStart);
     });
   }, [reservations, periodStart, periodEnd]);
 

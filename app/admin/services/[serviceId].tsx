@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../../lib/supabase';
+import { pickImage, uploadServiceImage } from '../../../lib/uploadServiceImage';
 
 type Service = {
   id: string;
@@ -43,7 +44,18 @@ export default function AdminServiceDetail() {
   const [shortDesc, setShortDesc] = useState('');
   const [longDesc, setLongDesc] = useState('');
   const [imageUrl, setImageUrl] = useState('');
+  const [localImageUri, setLocalImageUri] = useState<string | null>(null);
   const [isExternal, setIsExternal] = useState(false);
+
+  const handlePickImage = async () => {
+    const uri = await pickImage();
+    if (uri) setLocalImageUri(uri);
+  };
+
+  const handleClearImage = () => {
+    setLocalImageUri(null);
+    setImageUrl('');
+  };
 
   const load = async () => {
     if (!serviceId) return;
@@ -75,6 +87,7 @@ export default function AdminServiceDetail() {
     setShortDesc(service.short_description_es ?? '');
     setLongDesc(service.long_description_es ?? '');
     setImageUrl(service.image_url ?? '');
+    setLocalImageUri(null);
     setIsExternal(service.is_external);
     setIsEditing(false);
   };
@@ -90,17 +103,22 @@ export default function AdminServiceDetail() {
     }
     setSaving(true);
     try {
+      let resolvedImageUrl = imageUrl.trim() || null;
+      if (localImageUri) {
+        resolvedImageUrl = await uploadServiceImage(localImageUri, service.id);
+      }
       const { error } = await supabase
         .from('services')
         .update({
           name_es: name.trim(),
           short_description_es: shortDesc.trim(),
           long_description_es: longDesc.trim(),
-          image_url: imageUrl.trim() || null,
+          image_url: resolvedImageUrl,
           is_external: isExternal,
         })
         .eq('id', service.id);
       if (error) throw error;
+      setLocalImageUri(null);
       await load();
       setIsEditing(false);
     } catch (e: any) {
@@ -175,6 +193,31 @@ export default function AdminServiceDetail() {
     );
   };
 
+  const hasChanges =
+    isEditing &&
+    service !== null &&
+    (name !== service.name_es ||
+      shortDesc !== (service.short_description_es ?? '') ||
+      longDesc !== (service.long_description_es ?? '') ||
+      imageUrl !== (service.image_url ?? '') ||
+      localImageUri !== null ||
+      isExternal !== service.is_external);
+
+  const confirmDiscardIfDirty = (onDiscard: () => void) => {
+    if (!hasChanges) {
+      onDiscard();
+      return;
+    }
+    Alert.alert(
+      'Cambios sin guardar',
+      '¿Quieres descartar los cambios?',
+      [
+        { text: 'Seguir editando', style: 'cancel' },
+        { text: 'Descartar', style: 'destructive', onPress: onDiscard },
+      ],
+    );
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.center}>
@@ -203,7 +246,14 @@ export default function AdminServiceDetail() {
         >
           {/* Cabecera */}
           <View style={styles.headerRow}>
-            <Pressable onPress={() => router.back()} style={styles.backBtn}>
+            <Pressable
+              onPress={() =>
+                isEditing
+                  ? confirmDiscardIfDirty(() => router.back())
+                  : router.back()
+              }
+              style={styles.backBtn}
+            >
               <Text style={styles.backText}>‹ Volver</Text>
             </Pressable>
             <Text style={styles.pageTitle} numberOfLines={1}>
@@ -211,7 +261,9 @@ export default function AdminServiceDetail() {
             </Text>
             <Pressable
               onPress={() =>
-                isEditing ? handleCancelEdit() : setIsEditing(true)
+                isEditing
+                  ? confirmDiscardIfDirty(handleCancelEdit)
+                  : setIsEditing(true)
               }
               style={styles.editBtn}
             >
@@ -220,7 +272,43 @@ export default function AdminServiceDetail() {
           </View>
 
           {/* Imagen */}
-          {service.image_url ? (
+          {isEditing ? (
+            <View style={styles.image}>
+              {localImageUri || imageUrl ? (
+                <>
+                  <Pressable
+                    onPress={handlePickImage}
+                    style={StyleSheet.absoluteFill}
+                  >
+                    <Image
+                      source={{ uri: localImageUri ?? imageUrl }}
+                      style={StyleSheet.absoluteFill}
+                    />
+                    <View style={styles.imageEditOverlay}>
+                      <Text style={styles.imageEditOverlayText}>
+                        Toca para cambiar imagen
+                      </Text>
+                    </View>
+                  </Pressable>
+                  <Pressable
+                    onPress={handleClearImage}
+                    style={styles.imageClearBtn}
+                  >
+                    <Text style={styles.imageClearBtnText}>✕</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <Pressable
+                  onPress={handlePickImage}
+                  style={[styles.imagePlaceholder, { flex: 1 }]}
+                >
+                  <Text style={styles.imageAddText}>
+                    📷 Toca para añadir imagen
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          ) : service.image_url ? (
             <Image source={{ uri: service.image_url }} style={styles.image} />
           ) : (
             <View style={[styles.image, styles.imagePlaceholder]}>
@@ -317,25 +405,14 @@ export default function AdminServiceDetail() {
               </Text>
             )}
 
-            {/* URL imagen */}
-            <Text style={styles.fieldLabel}>URL de imagen</Text>
-            {isEditing ? (
-              <TextInput
-                value={imageUrl}
-                onChangeText={setImageUrl}
-                style={styles.input}
-                autoCapitalize="none"
-                keyboardType="url"
-                placeholder="https://... (opcional)"
-              />
-            ) : (
-              <Text style={styles.fieldValue}>{service.image_url || '—'}</Text>
-            )}
 
             {/* Botones guardar/cancelar en modo edición */}
             {isEditing && (
               <View style={styles.editButtons}>
-                <Pressable onPress={handleCancelEdit} style={styles.btnCancel}>
+                <Pressable
+                  onPress={() => confirmDiscardIfDirty(handleCancelEdit)}
+                  style={styles.btnCancel}
+                >
                   <Text style={styles.btnCancelText}>Cancelar</Text>
                 </Pressable>
                 <Pressable
@@ -426,8 +503,33 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 220,
     backgroundColor: '#eee',
+    overflow: 'hidden',
   },
   imagePlaceholder: { justifyContent: 'center', alignItems: 'center' },
+  imageClearBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imageClearBtnText: { color: 'white', fontSize: 14, fontWeight: '700' },
+
+  imageEditOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  imageEditOverlayText: { color: 'white', fontWeight: '700', fontSize: 14 },
+  imageAddText: { color: '#888', fontSize: 14, fontWeight: '600' },
 
   card: {
     marginHorizontal: 16,

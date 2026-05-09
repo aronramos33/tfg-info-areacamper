@@ -10,10 +10,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
+import { pickImage, uploadServiceImage } from '../../../lib/uploadServiceImage';
 
 type Tab = 'internal' | 'external';
 
@@ -27,8 +29,13 @@ export default function AdminServiceNew() {
   const [name, setName] = useState('');
   const [shortDesc, setShortDesc] = useState('');
   const [longDesc, setLongDesc] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
+  const [localImageUri, setLocalImageUri] = useState<string | null>(null);
   const [isExternal, setIsExternal] = useState(type === 'external');
+
+  const handlePickImage = async () => {
+    const uri = await pickImage();
+    if (uri) setLocalImageUri(uri);
+  };
 
   const isValid =
     id.trim() && name.trim() && shortDesc.trim() && longDesc.trim();
@@ -55,6 +62,11 @@ export default function AdminServiceNew() {
 
     setSaving(true);
     try {
+      let resolvedImageUrl: string | null = null;
+      if (localImageUri) {
+        resolvedImageUrl = await uploadServiceImage(localImageUri, cleanId);
+      }
+
       // Calcular order_index
       const { data: all } = await supabase
         .from('services')
@@ -68,7 +80,7 @@ export default function AdminServiceNew() {
         name_es: name.trim(),
         short_description_es: shortDesc.trim(),
         long_description_es: longDesc.trim(),
-        image_url: imageUrl.trim() || null,
+        image_url: resolvedImageUrl,
         is_external: isExternal,
         is_active: true,
         order_index: maxOrder + 1,
@@ -190,15 +202,29 @@ export default function AdminServiceNew() {
               textAlignVertical="top"
             />
 
-            <Text style={styles.fieldLabel}>URL de imagen</Text>
-            <TextInput
-              value={imageUrl}
-              onChangeText={setImageUrl}
-              placeholder="https://... (opcional)"
-              style={styles.input}
-              autoCapitalize="none"
-              keyboardType="url"
-            />
+            <Text style={styles.fieldLabel}>Imagen</Text>
+            <Pressable onPress={handlePickImage} style={styles.imagePicker}>
+              {localImageUri ? (
+                <>
+                  <Image
+                    source={{ uri: localImageUri }}
+                    style={styles.imagePickerPreview}
+                  />
+                  <View style={styles.imagePickerOverlay}>
+                    <Text style={styles.imagePickerOverlayText}>
+                      Cambiar imagen
+                    </Text>
+                  </View>
+                </>
+              ) : (
+                <View style={styles.imagePickerEmpty}>
+                  <Text style={styles.imagePickerEmptyIcon}>📷</Text>
+                  <Text style={styles.imagePickerEmptyText}>
+                    Toca para añadir imagen
+                  </Text>
+                </View>
+              )}
+            </Pressable>
           </View>
 
           {/* Botón crear */}
@@ -317,6 +343,41 @@ const styles = StyleSheet.create({
     borderColor: '#ffcdd2',
     backgroundColor: '#fff8f8',
   },
+
+  imagePicker: {
+    height: 160,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: '#F0F2F5',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  imagePickerPreview: {
+    width: '100%',
+    height: '100%',
+  },
+  imagePickerOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  imagePickerOverlayText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  imagePickerEmpty: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  imagePickerEmptyIcon: { fontSize: 28 },
+  imagePickerEmptyText: { color: '#999', fontSize: 13, fontWeight: '600' },
 
   btnCreate: {
     backgroundColor: '#007AFF',

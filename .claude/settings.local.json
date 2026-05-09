@@ -29,7 +29,9 @@
       "Bash(del *)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\aronr\\\\Documents\\\\tfg-info-areacamper\" -Recurse -Include \"*.ts\" -Path \"*supabase*functions*\")",
       "Bash(Select-Object FullName)",
-      "mcp__claude_ai_Supabase__list_migrations"
+      "mcp__claude_ai_Supabase__list_migrations",
+      "Bash(node -e ' *)",
+      "Bash(npx tsc *)"
     ]
   }
 }
