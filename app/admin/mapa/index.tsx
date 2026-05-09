@@ -17,6 +17,7 @@ import DateTimePicker, {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
+import ParkingMapPicker from '../../../components/ParkingMapPicker';
 import dayjs from 'dayjs';
 import isoWeek from 'dayjs/plugin/isoWeek';
 
@@ -220,6 +221,15 @@ export default function AdminMapaPlazas() {
     [places, getPlaceStatus],
   );
   const freeCount = totalPlaces - occupiedCount - maintCount;
+
+  const occupiedForMap = new Set(
+    places.filter((p) => getPlaceStatus(p.id) === 'occupied').map((p) => p.id),
+  );
+  const maintenanceForMap = new Set(
+    places
+      .filter((p) => getPlaceStatus(p.id) === 'maintenance')
+      .map((p) => p.id),
+  );
 
   // ── Reservas del período (para lista) ─────────────────────────────────────
   // solo las que NO son de mantenimiento (reservas reales)
@@ -426,7 +436,7 @@ export default function AdminMapaPlazas() {
           </View>
         </View>
 
-        {/* Grid plazas */}
+        {/* Mapa de plazas */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>
             🅿️ Estado de plazas — {periodLabel()}
@@ -434,41 +444,14 @@ export default function AdminMapaPlazas() {
           <Text style={styles.cardSubtitle}>
             Toca una plaza para cambiar su estado
           </Text>
-          <View style={styles.placesGrid}>
-            {places.map((place) => {
-              const status = getPlaceStatus(place.id);
-              const bg =
-                status === 'maintenance'
-                  ? '#FF9800'
-                  : status === 'occupied'
-                    ? '#f44336'
-                    : status === 'partial'
-                      ? '#FFC107'
-                      : '#4CAF50';
-              return (
-                <Pressable
-                  key={place.id}
-                  onPress={() => openPlaceModal(place.id)}
-                  style={({ pressed }) => [
-                    styles.placeCell,
-                    { opacity: pressed ? 0.7 : 1 },
-                  ]}
-                >
-                  <View
-                    style={[styles.placeCellInner, { backgroundColor: bg }]}
-                  >
-                    <Text style={styles.placeCellText}>{place.id}</Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
-          <View style={styles.legend}>
-            <Text style={styles.legendItem}>🟢 Libre</Text>
-            <Text style={styles.legendItem}>🟡 Parcial</Text>
-            <Text style={styles.legendItem}>🔴 Ocupada</Text>
-            <Text style={styles.legendItem}>🟠 Mantenimiento</Text>
-          </View>
+          <ParkingMapPicker
+            places={places}
+            occupiedIds={occupiedForMap}
+            maintenanceIds={maintenanceForMap}
+            selectedIds={[]}
+            onToggle={openPlaceModal}
+            blockOccupied={false}
+          />
         </View>
 
         {/* Lista reservas del período */}

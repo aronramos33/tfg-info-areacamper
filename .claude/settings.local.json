@@ -31,7 +31,9 @@
       "Bash(Select-Object FullName)",
       "mcp__claude_ai_Supabase__list_migrations",
       "Bash(node -e ' *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(findstr -i \"svg\\\\|react-native-svg\")",
+      "Bash(findstr /i \"svg\")"
     ]
   }
 }

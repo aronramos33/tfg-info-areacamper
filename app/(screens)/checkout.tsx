@@ -26,6 +26,7 @@ import {
   parseLengthMeters,
   vehicleDisplayName,
 } from '@/components/utils/vehicle';
+import ParkingMapPicker from '@/components/ParkingMapPicker';
 
 type UserProfile = {
   full_name: string;
@@ -402,67 +403,18 @@ export default function CheckoutScreen() {
           {placesLoading ? (
             <ActivityIndicator style={{ marginVertical: 12 }} />
           ) : (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-              {allPlaces.map((place) => {
-                const occupied = occupiedPlaceIds.has(place.id);
-                const selected = selectedPlaceIds.includes(place.id);
-                return (
-                  <Pressable
-                    key={place.id}
-                    disabled={occupied}
-                    onPress={() =>
-                      setSelectedPlaceIds((prev) =>
-                        prev.includes(place.id)
-                          ? prev.filter((id) => id !== place.id)
-                          : [...prev, place.id],
-                      )
-                    }
-                    style={{
-                      width: '30%',
-                      paddingVertical: 14,
-                      borderRadius: 12,
-                      borderWidth: 2,
-                      borderColor: occupied
-                        ? '#E5E7EB'
-                        : selected
-                          ? '#1A73E8'
-                          : '#D1D5DB',
-                      backgroundColor: occupied
-                        ? '#F3F4F6'
-                        : selected
-                          ? '#EAF1FE'
-                          : '#fff',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontWeight: '700',
-                        fontSize: 15,
-                        color: occupied
-                          ? '#9CA3AF'
-                          : selected
-                            ? '#1A73E8'
-                            : '#111',
-                      }}
-                    >
-                      {place.name}
-                    </Text>
-                    {occupied && (
-                      <Text
-                        style={{
-                          fontSize: 10,
-                          color: '#9CA3AF',
-                          marginTop: 2,
-                        }}
-                      >
-                        Ocupada
-                      </Text>
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
+            <ParkingMapPicker
+              places={allPlaces}
+              occupiedIds={occupiedPlaceIds}
+              selectedIds={selectedPlaceIds}
+              onToggle={(id) =>
+                setSelectedPlaceIds((prev) =>
+                  prev.includes(id)
+                    ? prev.filter((x) => x !== id)
+                    : [...prev, id],
+                )
+              }
+            />
           )}
 
           {selectedPlaceIds.length > 0 && (
