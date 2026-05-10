@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, ActivityIndicator, StyleSheet, Pressable } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import { supabase } from '@/lib/supabase';
+import NfcAccessModal from '@/components/NfcAccessModal';
 
 type PermanentPass = {
   id: number;
@@ -19,6 +20,7 @@ export default function AdminQrScreen() {
   const [pass, setPass] = useState<PermanentPass | null>(null);
   const [qrPass, setQrPass] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [nfcVisible, setNfcVisible] = useState(false);
 
   // Load the permanent pass for this admin
   useEffect(() => {
@@ -122,6 +124,12 @@ export default function AdminQrScreen() {
                 <Text style={[styles.subtle, { marginTop: 12, textAlign: 'center' }]}>
                   Este QR te permite el acceso al recinto.{'\n'}Se renueva automáticamente.
                 </Text>
+                <Pressable
+                  onPress={() => setNfcVisible(true)}
+                  style={({ pressed }) => [styles.nfcBtn, pressed && { opacity: 0.7 }]}
+                >
+                  <Text style={styles.nfcBtnText}>📡 Acceso por NFC</Text>
+                </Pressable>
               </>
             ) : (
               <View style={styles.qrPlaceholder}>
@@ -131,6 +139,12 @@ export default function AdminQrScreen() {
           </View>
         </View>
       </View>
+
+      <NfcAccessModal
+        visible={nfcVisible}
+        onClose={() => setNfcVisible(false)}
+        kind="pass"
+      />
     </SafeAreaView>
   );
 }
@@ -164,4 +178,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  nfcBtn: {
+    marginTop: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: '#EEF4FF',
+    borderWidth: 1,
+    borderColor: '#1A73E8',
+  },
+  nfcBtnText: { color: '#1A73E8', fontWeight: '700', fontSize: 14 },
 });

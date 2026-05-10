@@ -33,7 +33,10 @@
       "Bash(node -e ' *)",
       "Bash(npx tsc *)",
       "Bash(findstr -i \"svg\\\\|react-native-svg\")",
-      "Bash(findstr /i \"svg\")"
+      "Bash(findstr /i \"svg\")",
+      "Bash(git rm *)",
+      "Bash(Remove-Item *)",
+      "Bash(git *)"
     ]
   }
 }

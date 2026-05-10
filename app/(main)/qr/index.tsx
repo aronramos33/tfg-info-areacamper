@@ -17,6 +17,7 @@ import dayjs from 'dayjs';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 import RequireAuthCard from '@/components/RequireAuthCard';
+import NfcAccessModal from '@/components/NfcAccessModal';
 
 type Reservation = {
   id: number;
@@ -58,6 +59,7 @@ export default function QrScreen() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showPast, setShowPast] = useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
+  const [nfcVisible, setNfcVisible] = useState(false);
 
   // ✅ NUEVO: token rotativo para el QR
   const [qrPass, setQrPass] = useState<string>('');
@@ -440,6 +442,15 @@ export default function QrScreen() {
                     >
                       Muestra este QR en el acceso.
                     </Text>
+                    <Pressable
+                      onPress={() => setNfcVisible(true)}
+                      style={({ pressed }) => [
+                        styles.nfcBtn,
+                        pressed && { opacity: 0.7 },
+                      ]}
+                    >
+                      <Text style={styles.nfcBtnText}>📡 Acceso por NFC</Text>
+                    </Pressable>
                   </>
                 ) : (
                   <>
@@ -543,6 +554,12 @@ export default function QrScreen() {
           <Text style={styles.newReservationBtnText}>+ Nueva reserva</Text>
         </Pressable>
       </ScrollView>
+
+      <NfcAccessModal
+        visible={nfcVisible}
+        onClose={() => setNfcVisible(false)}
+        kind="reservation"
+      />
     </SafeAreaView>
   );
 }
@@ -658,4 +675,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.3,
   },
+  nfcBtn: {
+    marginTop: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: '#EEF4FF',
+    borderWidth: 1,
+    borderColor: '#1A73E8',
+  },
+  nfcBtnText: { color: '#1A73E8', fontWeight: '700', fontSize: 14 },
 });
