@@ -2,6 +2,38 @@ import React from 'react';
 import { ScrollView, View, Text } from 'react-native';
 import Svg, { Rect, Text as SvgText, G, Line } from 'react-native-svg';
 
+/**
+ * Returns true if the selection leaves a single free+unselected spot flanked
+ * on both sides by blocked (occupied or selected) spots.
+ * Runs the check on each row independently.
+ */
+export function hasIsolatedGap(
+  rowIds: number[],
+  occupiedIds: Set<number>,
+  selectedIds: number[],
+): boolean {
+  const blocked = (id: number) =>
+    occupiedIds.has(id) || selectedIds.includes(id);
+
+  let i = 0;
+  while (i < rowIds.length) {
+    if (!blocked(rowIds[i])) {
+      const seqStart = i;
+      while (i < rowIds.length && !blocked(rowIds[i])) i++;
+      const seqEnd = i - 1;
+      const seqLen = seqEnd - seqStart + 1;
+      const leftBlocked =
+        seqStart > 0 && blocked(rowIds[seqStart - 1]);
+      const rightBlocked =
+        seqEnd < rowIds.length - 1 && blocked(rowIds[seqEnd + 1]);
+      if (seqLen === 1 && leftBlocked && rightBlocked) return true;
+    } else {
+      i++;
+    }
+  }
+  return false;
+}
+
 interface Place {
   id: number;
   name: string;

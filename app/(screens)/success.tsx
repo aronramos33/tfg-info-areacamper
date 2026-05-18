@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
+import { usePendingReservation } from '@/providers/PendingReservationContext';
 
 type ReservationRow = {
   id: number;
@@ -31,6 +32,15 @@ type ReservationRow = {
 function formatEuro(cents: number) {
   return `${(cents / 100).toFixed(2)} €`;
 }
+
+// Converts DD/MM/YYYY or YYYY-MM-DD to YYYY-MM-DD for Supabase date column
+function normalizeBirthDate(raw: string): string {
+  if (!raw) return '';
+  const ddmmyyyy = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+  const m = raw.match(ddmmyyyy);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return raw; // assume already YYYY-MM-DD
+}
 function formatDate(d: string | null) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('es-ES');
@@ -43,6 +53,8 @@ export default function SuccessPage() {
     mode?: string;
   }>();
   const isModify = mode === 'modify';
+  const { pending, resetPending } = usePendingReservation();
+  const travelersSaved = useRef(false);
 
   const [reservation, setReservation] = useState<ReservationRow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -98,7 +110,7 @@ export default function SuccessPage() {
             )
             .eq('id', pay.reservation_id)
             .maybeSingle();
-          if (r) setReservation(r as ReservationRow);
+          if (r) setReservation(r as unknown as ReservationRow);
           setLoading(false);
           clearInterval(timer);
           return;
@@ -115,9 +127,36 @@ export default function SuccessPage() {
         if (!isMounted) return;
 
         if (data) {
-          setReservation(data as ReservationRow);
+          const reservationRow = data as unknown as ReservationRow;
+          setReservation(reservationRow);
           setLoading(false);
           clearInterval(timer);
+          // Save travelers if this is a new reservation and we have pending data
+          if (!isModify && !travelersSaved.current && pending.placeConfigs.length > 0) {
+            travelersSaved.current = true;
+            const rows = pending.placeConfigs.map((cfg, placeIndex) => ({
+              reservation_id: reservationRow.id,
+              full_name: cfg.traveler.full_name,
+              doc_type: cfg.traveler.doc_type,
+              doc_number: cfg.traveler.doc_number,
+              doc_support_number: cfg.traveler.doc_support_number || null,
+              nationality: cfg.traveler.nationality,
+              birth_date: normalizeBirthDate(cfg.traveler.birth_date),
+              gender: cfg.traveler.gender,
+              country_of_residence: cfg.traveler.country_of_residence || null,
+              city_of_residence: cfg.traveler.city_of_residence || null,
+              phone: cfg.traveler.phone || null,
+              email: cfg.traveler.email || null,
+              place_index: placeIndex,
+              vehicle_id: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.id : null,
+              vehicle_brand: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.brand : null,
+              vehicle_model: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.model : null,
+              vehicle_plate: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.plate : null,
+              vehicle_alias: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.alias : null,
+              vehicle_length_m: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.length_m : null,
+            }));
+            supabase.from('travelers').insert(rows).then(() => resetPending());
+          }
           return;
         }
       }
