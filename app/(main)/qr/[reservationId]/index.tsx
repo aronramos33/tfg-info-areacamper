@@ -57,6 +57,24 @@ type ExtraLine = {
   extras: { code: string; name_es: string } | null;
 };
 
+type TravelerRow = {
+  id: number;
+  place_index: number | null;
+  full_name: string;
+  doc_type: string;
+  doc_number: string;
+  nationality: string;
+  birth_date: string;
+  gender: string;
+  country_of_residence: string | null;
+  city_of_residence: string | null;
+  phone: string | null;
+  email: string | null;
+  vehicle_plate: string | null;
+  vehicle_brand: string | null;
+  vehicle_model: string | null;
+};
+
 function formatEuro(cents?: number | null) {
   return `${(Number(cents ?? 0) / 100).toFixed(2)} €`;
 }
@@ -74,6 +92,7 @@ export default function ReservationDetailUserScreen() {
     null,
   );
   const [extras, setExtras] = useState<ExtraLine[]>([]);
+  const [travelers, setTravelers] = useState<TravelerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
 
@@ -97,14 +116,20 @@ export default function ReservationDetailUserScreen() {
     }
     setReservation(r as ReservationDetail);
 
-    const { data: extraRows } = await supabase
-      .from('reservation_extras')
-      .select(
-        'quantity, unit_amount_cents, line_total_cents, pricing_type, extras(code, name_es)',
-      )
-      .eq('reservation_id', Number(reservationId));
+    const [extrasRes, travelersRes] = await Promise.all([
+      supabase
+        .from('reservation_extras')
+        .select('quantity, unit_amount_cents, line_total_cents, pricing_type, extras(code, name_es)')
+        .eq('reservation_id', Number(reservationId)),
+      supabase
+        .from('travelers')
+        .select('id, place_index, full_name, doc_type, doc_number, nationality, birth_date, gender, country_of_residence, city_of_residence, phone, email, vehicle_plate, vehicle_brand, vehicle_model')
+        .eq('reservation_id', Number(reservationId))
+        .order('place_index', { ascending: true }),
+    ]);
 
-    setExtras(((extraRows ?? []) as unknown) as ExtraLine[]);
+    setExtras(((extrasRes.data ?? []) as unknown) as ExtraLine[]);
+    setTravelers((travelersRes.data ?? []) as TravelerRow[]);
     setLoading(false);
   }, [reservationId, session?.user?.id, router]);
 
@@ -261,6 +286,43 @@ export default function ReservationDetailUserScreen() {
                 value={formatEuro(e.line_total_cents)}
               />
             ))}
+          </View>
+        )}
+
+        {/* Viajeros */}
+        {travelers.length > 0 && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>🪪 Viajeros registrados</Text>
+            {travelers.map((t, i) => (
+              <View key={t.id} style={{ marginBottom: i < travelers.length - 1 ? 12 : 0 }}>
+                {travelers.length > 1 && (
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#888', marginBottom: 4 }}>
+                    Plaza {(t.place_index ?? i) + 1}
+                  </Text>
+                )}
+                <Row label="Nombre" value={t.full_name} />
+                <Row label="Documento" value={`${t.doc_type.toUpperCase()} ${t.doc_number}`} />
+                <Row label="Nacionalidad" value={t.nationality} />
+                <Row label="Nacimiento" value={t.birth_date} />
+                {t.vehicle_plate && (
+                  <Row
+                    label="Vehículo"
+                    value={[t.vehicle_brand, t.vehicle_model, t.vehicle_plate].filter(Boolean).join(' · ')}
+                  />
+                )}
+              </View>
+            ))}
+          </View>
+        )}
+
+        {travelers.length === 0 && !cancelled && (
+          <View style={[styles.card, { borderLeftWidth: 3, borderLeftColor: '#FF9500' }]}>
+            <Text style={{ fontSize: 13, color: '#7a4f00', fontWeight: '600' }}>
+              ⚠️ Viajeros pendientes de registrar
+            </Text>
+            <Text style={{ fontSize: 12, color: '#5c4400', marginTop: 4 }}>
+              Añade los datos de los viajeros para cumplir con la normativa de registro de viajeros.
+            </Text>
           </View>
         )}
 

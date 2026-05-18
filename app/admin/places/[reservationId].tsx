@@ -45,6 +45,25 @@ type ExtraLine = {
   line_total_cents: number;
 };
 
+type TravelerRow = {
+  id: number;
+  place_index: number | null;
+  full_name: string;
+  doc_type: string;
+  doc_number: string;
+  doc_support_number: string | null;
+  nationality: string;
+  birth_date: string;
+  gender: string;
+  country_of_residence: string | null;
+  city_of_residence: string | null;
+  phone: string | null;
+  email: string | null;
+  vehicle_plate: string | null;
+  vehicle_brand: string | null;
+  vehicle_model: string | null;
+};
+
 function formatEuro(cents: number | null) {
   return `${((cents ?? 0) / 100).toFixed(2)} €`;
 }
@@ -67,6 +86,7 @@ export default function ReservationDetailScreen() {
     null,
   );
   const [extras, setExtras] = useState<ExtraLine[]>([]);
+  const [travelers, setTravelers] = useState<TravelerRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   const goBack = useCallback(() => {
@@ -112,18 +132,23 @@ export default function ReservationDetailScreen() {
         }
         setReservation(r as ReservationDetail);
 
-        const { data: extraRows } = await supabase
-          .from('reservation_extras')
-          .select(
-            'quantity, unit_amount_cents, line_total_cents, extras(code, name_es)',
-          )
-          .eq('reservation_id', Number(reservationId));
+        const [extrasRes, travelersRes] = await Promise.all([
+          supabase
+            .from('reservation_extras')
+            .select('quantity, unit_amount_cents, line_total_cents, extras(code, name_es)')
+            .eq('reservation_id', Number(reservationId)),
+          supabase
+            .from('travelers')
+            .select('id, place_index, full_name, doc_type, doc_number, doc_support_number, nationality, birth_date, gender, country_of_residence, city_of_residence, phone, email, vehicle_plate, vehicle_brand, vehicle_model')
+            .eq('reservation_id', Number(reservationId))
+            .order('place_index', { ascending: true }),
+        ]);
 
         if (!alive) return;
 
-        if (extraRows) {
+        if (extrasRes.data) {
           setExtras(
-            extraRows.map((row: any) => ({
+            extrasRes.data.map((row: any) => ({
               name_es: row.extras?.name_es ?? '—',
               code: row.extras?.code ?? '',
               quantity: row.quantity,
@@ -132,6 +157,7 @@ export default function ReservationDetailScreen() {
             })),
           );
         }
+        setTravelers((travelersRes.data ?? []) as TravelerRow[]);
 
         setLoading(false);
       };
@@ -241,6 +267,42 @@ export default function ReservationDetailScreen() {
             }
           />
           <Row label="Código acceso" value={reservation.access_code ?? '—'} />
+        </View>
+
+        {/* Viajeros */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>🪪 Viajeros</Text>
+          {travelers.length === 0 ? (
+            <Text style={{ color: '#FF9500', fontSize: 13, fontWeight: '600' }}>
+              Sin datos de viajeros registrados
+            </Text>
+          ) : (
+            travelers.map((t, i) => (
+              <View key={t.id} style={{ marginBottom: i < travelers.length - 1 ? 14 : 0 }}>
+                {travelers.length > 1 && (
+                  <Text style={{ fontSize: 12, fontWeight: '800', color: '#444', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    Plaza {(t.place_index ?? i) + 1}
+                  </Text>
+                )}
+                <Row label="Nombre" value={t.full_name} />
+                <Row label="Documento" value={`${t.doc_type.toUpperCase()} ${t.doc_number}`} />
+                {t.doc_support_number ? <Row label="Nº soporte" value={t.doc_support_number} /> : null}
+                <Row label="Nacionalidad" value={t.nationality} />
+                <Row label="Nacimiento" value={t.birth_date} />
+                <Row label="Género" value={t.gender === 'm' ? 'Hombre' : t.gender === 'f' ? 'Mujer' : 'Otro'} />
+                {t.country_of_residence ? <Row label="País residencia" value={t.country_of_residence} /> : null}
+                {t.city_of_residence ? <Row label="Localidad" value={t.city_of_residence} /> : null}
+                {t.phone ? <Row label="Teléfono" value={t.phone} /> : null}
+                {t.email ? <Row label="Email" value={t.email} /> : null}
+                {t.vehicle_plate ? (
+                  <Row
+                    label="Vehículo"
+                    value={[t.vehicle_brand, t.vehicle_model, t.vehicle_plate].filter(Boolean).join(' · ')}
+                  />
+                ) : null}
+              </View>
+            ))
+          )}
         </View>
 
         {/* Desglose económico */}
