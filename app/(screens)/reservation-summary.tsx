@@ -7,6 +7,7 @@ import {
   Pressable,
   Alert,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,6 +20,13 @@ import { usePendingReservation } from '@/providers/PendingReservationContext';
 import { nightsBetween } from '@/components/utils/dates';
 import { formatCents } from '@/components/utils/money';
 import { vehicleDisplayName } from '@/components/utils/vehicle';
+
+function normalizeBirthDate(raw: string): string {
+  if (!raw) return '';
+  const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return raw;
+}
 
 type Extra = {
   id: number;
@@ -33,9 +41,11 @@ export default function ReservationSummaryScreen() {
   const { session, profile } = useAuth();
   const { pending, setPending } = usePendingReservation();
 
+  const { resetPending } = usePendingReservation();
   const [extras, setExtras] = useState<Extra[]>([]);
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
+  const [verifying, setVerifying] = useState(false);
 
   const [holder, setHolder] = useState({
     full_name: '',
@@ -169,36 +179,72 @@ export default function ReservationSummaryScreen() {
       }
 
       const sessionId = fnData.session_id as string;
-      // Store in context as fallback
       setPending(prev => ({ ...prev, checkoutSessionId: sessionId }));
 
-      // openAuthSessionAsync intercepts the stripe-success deep link redirect,
-      // closes the browser cleanly, and returns the URL — without triggering
-      // Expo Router's automatic deep link navigation (which crashed with the
-      // (screens) modal Stack having 4 screens pushed).
       const redirectBase = Linking.createURL('/');
-      const result = await WebBrowser.openAuthSessionAsync(fnData.url, redirectBase);
+      await WebBrowser.openAuthSessionAsync(fnData.url, redirectBase);
 
-      // Extract session_id: try from result URL first, fall back to context
-      let sid = sessionId;
-      if (result.type === 'success' && result.url) {
-        try {
-          const parsed = new URL(result.url);
-          sid = parsed.searchParams.get('session_id') || sessionId;
-        } catch {}
+      // Browser closed. Poll for the reservation directly here — bypasses
+      // the Expo Router navigation issues with the modal (screens) stack.
+      setPaying(false);
+      setVerifying(true);
+
+      let reservationId: number | null = null;
+      for (let tick = 0; tick < 30 && !reservationId; tick++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const { data } = await supabase
+          .from('reservations')
+          .select('id')
+          .eq('checkout_session_id', sessionId)
+          .maybeSingle();
+        if (data) reservationId = data.id;
       }
 
-      // Navigate to success regardless of result type as long as we have a session_id.
-      // - 'success': redirect intercepted correctly
-      // - 'dismiss': Android or redirect not intercepted but payment may have gone through
-      // - 'cancel': user may have genuinely cancelled; success.tsx will timeout gracefully
-      // In all cases success.tsx uses the session_id to poll — if no reservation found
-      // after 60s it shows a friendly timeout screen with "Ir a mis reservas".
-      router.push({ pathname: '/(screens)/success', params: { session_id: sid } });
+      // Save travelers if payment went through
+      if (reservationId && pending.placeConfigs.length > 0) {
+        try {
+          const rows = pending.placeConfigs.flatMap((cfg, placeIndex) =>
+            (cfg.guests ?? [])
+              .filter(g => g.full_name?.trim())
+              .map((g, guestIndex) => ({
+                reservation_id: reservationId,
+                full_name: g.full_name || null,
+                doc_type: g.doc_type || null,
+                doc_number: g.doc_number || null,
+                nationality: g.nationality || null,
+                birth_date: g.birth_date ? normalizeBirthDate(g.birth_date) : null,
+                gender: null,
+                place_index: placeIndex,
+                is_main_traveler: placeIndex === 0 && guestIndex === 0,
+                vehicle_id: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.id : null,
+                vehicle_brand: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.brand : null,
+                vehicle_model: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.model : null,
+                vehicle_plate: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.plate : null,
+              }))
+          );
+          if (rows.length > 0) await supabase.from('travelers').insert(rows);
+        } catch (e) {
+          console.warn('travelers insert:', e);
+        }
+      }
+
+      resetPending();
+      setVerifying(false);
+
+      if (reservationId) {
+        router.replace({ pathname: '/(main)/qr', params: { reservation_id: String(reservationId) } });
+      } else {
+        Alert.alert(
+          'Pago recibido',
+          'El pago se procesó correctamente. La reserva aparecerá en unos momentos en "Mis reservas".',
+          [{ text: 'Ver mis reservas', onPress: () => router.replace('/(main)/qr') }],
+        );
+      }
     } catch {
       Alert.alert('Error', 'Ha ocurrido un problema al crear la reserva.');
     } finally {
       setPaying(false);
+      setVerifying(false);
     }
   };
 
@@ -215,6 +261,17 @@ export default function ReservationSummaryScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FC' }}>
+      {/* Verifying overlay — shown while polling for the reservation after payment */}
+      <Modal visible={verifying} transparent animationType="fade">
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', gap: 16 }}>
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Confirmando reserva…</Text>
+          <Text style={{ color: '#ddd', fontSize: 13, textAlign: 'center', paddingHorizontal: 32 }}>
+            Esto puede tardar unos segundos.
+          </Text>
+        </View>
+      </Modal>
+
       <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 }}>
         <Text style={{ fontSize: 22, fontWeight: '700', marginBottom: 4 }}>Resumen de la reserva</Text>
         <Text style={{ fontSize: 13, color: '#888', marginBottom: 20 }}>Revisa los datos antes de pagar.</Text>
