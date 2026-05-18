@@ -8,6 +8,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
 import dayjs from 'dayjs';
@@ -23,10 +24,11 @@ type Extra = {
   code: string;
   name_es: string;
   unit_amount_cents: number;
-  pricing_type: 'per_night' | string;
+  pricing_type: 'per_night' | 'per_stay' | string;
 };
 
 export default function ReservationSummaryScreen() {
+  const router = useRouter();
   const { session, profile } = useAuth();
   const { pending, setPending } = usePendingReservation();
 
@@ -35,13 +37,12 @@ export default function ReservationSummaryScreen() {
   const [paying, setPaying] = useState(false);
 
   const [holder, setHolder] = useState({
-    full_name: profile?.full_name ?? '',
-    phone: profile?.phone ?? '',
-    dni: profile?.dni ?? '',
+    full_name: '',
+    phone: '',
+    dni: '',
   });
 
   useEffect(() => {
-    // Initialize holder from profile or pending
     setHolder({
       full_name: pending.holder.full_name || profile?.full_name || '',
       phone: pending.holder.phone || profile?.phone || '',
@@ -67,68 +68,65 @@ export default function ReservationSummaryScreen() {
 
   const baseTotal = nights * pending.nightlyCents * pending.selectedPlaceIds.length;
 
+  const petExtra = extras.find(e => e.code === 'PET');
+  const powerExtra = extras.find(e => e.code === 'POWER');
+
   const extrasTotal = useMemo(() => {
     return pending.placeConfigs.reduce((sum, cfg) => {
-      return (
-        sum +
-        cfg.extras.reduce((s, e) => {
-          const meta = extras.find((x) => x.id === e.extra_id);
-          if (!meta) return s;
-          const lineTotal =
-            meta.pricing_type === 'per_stay'
-              ? e.quantity * meta.unit_amount_cents
-              : e.quantity * nights * meta.unit_amount_cents;
-          return s + lineTotal;
-        }, 0)
-      );
+      let placeSum = 0;
+      if (cfg.numPets > 0 && petExtra) {
+        placeSum += petExtra.pricing_type === 'per_stay'
+          ? cfg.numPets * petExtra.unit_amount_cents
+          : cfg.numPets * nights * petExtra.unit_amount_cents;
+      }
+      if (cfg.electricidad && powerExtra) {
+        placeSum += powerExtra.pricing_type === 'per_stay'
+          ? powerExtra.unit_amount_cents
+          : nights * powerExtra.unit_amount_cents;
+      }
+      return sum + placeSum;
     }, 0);
-  }, [pending.placeConfigs, extras, nights]);
+  }, [pending.placeConfigs, petExtra, powerExtra, nights]);
 
   const grandTotal = baseTotal + extrasTotal;
 
   const handlePay = async () => {
     if (!session) return;
 
-    if (!holder.full_name.trim()) {
-      Alert.alert('Nombre requerido', 'Indica el nombre del titular.');
-      return;
-    }
-    if (!holder.dni.trim()) {
-      Alert.alert('Documento requerido', 'Indica el DNI/NIE/Pasaporte del titular.');
-      return;
-    }
-    if (!holder.phone.trim()) {
-      Alert.alert('Teléfono requerido', 'Indica un teléfono de contacto.');
-      return;
-    }
+    if (!holder.full_name.trim()) { Alert.alert('Nombre requerido', 'Indica el nombre del titular.'); return; }
+    if (!holder.dni.trim()) { Alert.alert('Documento requerido', 'Indica el DNI/NIE/Pasaporte del titular.'); return; }
+    if (!holder.phone.trim()) { Alert.alert('Teléfono requerido', 'Indica un teléfono de contacto.'); return; }
 
-    // Save holder to context
-    setPending((prev) => ({ ...prev, holder }));
+    setPending(prev => ({ ...prev, holder }));
 
-    // Build extras payload (flat, per-place with place_index)
-    const extrasPayload = pending.placeConfigs.flatMap((cfg, placeIndex) =>
-      cfg.extras
-        .filter((e) => e.quantity > 0)
-        .map((e) => {
-          const meta = extras.find((x) => x.id === e.extra_id);
-          const unitAmount = meta?.unit_amount_cents ?? 0;
-          const pricingType = meta?.pricing_type ?? 'per_night';
-          const lineTotal =
-            pricingType === 'per_stay'
-              ? e.quantity * unitAmount
-              : e.quantity * nights * unitAmount;
-          return {
-            extra_id: e.extra_id,
-            quantity: e.quantity,
-            place_index: placeIndex,
-            pricing_type: pricingType,
-            unit_amount_cents: unitAmount,
-            line_total_cents: lineTotal,
-          };
-        }),
-    );
+    // Build flat extras payload (PET + POWER per place, no PERSON)
+    const extrasPayload = pending.placeConfigs.flatMap((cfg, placeIndex) => {
+      const rows: object[] = [];
+      if (cfg.numPets > 0 && petExtra) {
+        const lineTotal = petExtra.pricing_type === 'per_stay'
+          ? cfg.numPets * petExtra.unit_amount_cents
+          : cfg.numPets * nights * petExtra.unit_amount_cents;
+        rows.push({
+          extra_id: petExtra.id, quantity: cfg.numPets, place_index: placeIndex,
+          pricing_type: petExtra.pricing_type,
+          unit_amount_cents: petExtra.unit_amount_cents,
+          line_total_cents: lineTotal,
+        });
+      }
+      if (cfg.electricidad && powerExtra) {
+        const lineTotal = powerExtra.pricing_type === 'per_stay'
+          ? powerExtra.unit_amount_cents
+          : nights * powerExtra.unit_amount_cents;
+        rows.push({
+          extra_id: powerExtra.id, quantity: 1, place_index: placeIndex,
+          pricing_type: powerExtra.pricing_type,
+          unit_amount_cents: powerExtra.unit_amount_cents,
+          line_total_cents: lineTotal,
+        });
+      }
+      return rows;
+    });
 
-    // First vehicle (snapshot for reservations table legacy columns)
     const firstCfg = pending.placeConfigs[0];
     const firstVehicle =
       firstCfg?.vehicleSelection?.type === 'saved'
@@ -164,13 +162,21 @@ export default function ReservationSummaryScreen() {
         Alert.alert('Error', fnError.message ?? 'No se pudo iniciar el pago.');
         return;
       }
-      if (!fnData?.url) {
+      if (!fnData?.url || !fnData?.session_id) {
         Alert.alert('Error', 'Respuesta inválida al iniciar el pago.');
         return;
       }
 
+      const sessionId = fnData.session_id as string;
       await WebBrowser.openBrowserAsync(fnData.url);
-    } catch (e) {
+
+      // After browser closes, navigate explicitly to success with the known session_id.
+      // This is a fallback for when the deep link doesn't fire correctly in Expo Go.
+      router.push({
+        pathname: '/(screens)/success',
+        params: { session_id: sessionId },
+      });
+    } catch {
       Alert.alert('Error', 'Ha ocurrido un problema al crear la reserva.');
     } finally {
       setPaying(false);
@@ -190,15 +196,9 @@ export default function ReservationSummaryScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FC' }}>
-      <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 }}
-      >
-        <Text style={{ fontSize: 22, fontWeight: '700', marginBottom: 4 }}>
-          Resumen de la reserva
-        </Text>
-        <Text style={{ fontSize: 13, color: '#888', marginBottom: 20 }}>
-          Revisa los datos antes de pagar.
-        </Text>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 }}>
+        <Text style={{ fontSize: 22, fontWeight: '700', marginBottom: 4 }}>Resumen de la reserva</Text>
+        <Text style={{ fontSize: 13, color: '#888', marginBottom: 20 }}>Revisa los datos antes de pagar.</Text>
 
         {/* Estancia */}
         <View style={card}>
@@ -208,46 +208,28 @@ export default function ReservationSummaryScreen() {
           <Row label="Noches" value={String(nights)} />
           <Row
             label="Plazas"
-            value={pending.selectedPlaceIds
-              .sort((a, b) => a - b)
-              .map((id) => `P${id}`)
-              .join(', ')}
+            value={pending.selectedPlaceIds.sort((a, b) => a - b).map(id => `P${id}`).join(', ')}
           />
         </View>
 
         {/* Por plaza */}
         {pending.placeConfigs.map((cfg, i) => {
-          const vehicle =
-            cfg.vehicleSelection?.type === 'saved'
-              ? cfg.vehicleSelection.vehicle
-              : null;
-          const placeExtras = cfg.extras.filter((e) => e.quantity > 0);
+          const vehicle = cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle : null;
           return (
             <View key={i} style={card}>
               <Text style={sectionTitle}>Plaza {i + 1}</Text>
-              <Row label="Viajero" value={cfg.traveler.full_name} />
-              <Row label="Documento" value={`${cfg.traveler.doc_type.toUpperCase()} ${cfg.traveler.doc_number}`} />
-              {vehicle && (
-                <Row
-                  label="Vehículo"
-                  value={`${vehicleDisplayName(vehicle)} · ${vehicle.plate}`}
-                />
-              )}
-              {placeExtras.map((e) => {
-                const meta = extras.find((x) => x.id === e.extra_id);
-                return meta ? (
-                  <Row
-                    key={e.extra_id}
-                    label={meta.name_es}
-                    value={`×${e.quantity}`}
-                  />
-                ) : null;
-              })}
+              {vehicle && <Row label="Vehículo" value={`${vehicleDisplayName(vehicle)} · ${vehicle.plate}`} />}
+              <Row label="Acompañantes" value={String(cfg.numGuests)} />
+              {cfg.numPets > 0 && <Row label="Mascotas" value={String(cfg.numPets)} />}
+              {cfg.electricidad && <Row label="Electricidad" value="Sí" />}
+              {cfg.guests.map((g, gi) => (
+                <Row key={gi} label={gi === 0 && i === 0 ? 'Titular' : `Acompañante ${gi + 1}`} value={g.full_name} />
+              ))}
             </View>
           );
         })}
 
-        {/* Desglose económico */}
+        {/* Desglose */}
         <View style={card}>
           <Text style={sectionTitle}>Total</Text>
           <Row
@@ -256,11 +238,7 @@ export default function ReservationSummaryScreen() {
           />
           {extrasTotal > 0 && <Row label="Extras" value={formatCents(extrasTotal)} />}
           <View style={{ height: 1, backgroundColor: '#F0F0F0', marginVertical: 8 }} />
-          <Row
-            label="Total"
-            value={formatCents(grandTotal)}
-            highlight
-          />
+          <Row label="Total" value={formatCents(grandTotal)} highlight />
         </View>
 
         {/* Titular */}
@@ -271,44 +249,21 @@ export default function ReservationSummaryScreen() {
           </Text>
 
           <Text style={fieldLabel}>Nombre completo *</Text>
-          <TextInput
-            value={holder.full_name}
-            onChangeText={(v) => setHolder((h) => ({ ...h, full_name: v }))}
-            placeholder="Nombre y apellidos"
-            autoCapitalize="words"
-            style={input}
-          />
+          <TextInput value={holder.full_name} onChangeText={v => setHolder(h => ({ ...h, full_name: v }))} placeholder="Nombre y apellidos" autoCapitalize="words" style={input} />
 
           <Text style={fieldLabel}>DNI / NIE / Pasaporte *</Text>
-          <TextInput
-            value={holder.dni}
-            onChangeText={(v) => setHolder((h) => ({ ...h, dni: v }))}
-            placeholder="12345678A"
-            autoCapitalize="characters"
-            autoCorrect={false}
-            style={input}
-          />
+          <TextInput value={holder.dni} onChangeText={v => setHolder(h => ({ ...h, dni: v }))} placeholder="12345678A" autoCapitalize="characters" autoCorrect={false} style={input} />
 
           <Text style={fieldLabel}>Teléfono *</Text>
-          <TextInput
-            value={holder.phone}
-            onChangeText={(v) => setHolder((h) => ({ ...h, phone: v }))}
-            placeholder="+34 600 000 000"
-            keyboardType="phone-pad"
-            style={input}
-          />
+          <TextInput value={holder.phone} onChangeText={v => setHolder(h => ({ ...h, phone: v }))} placeholder="+34 600 000 000" keyboardType="phone-pad" style={input} />
         </View>
 
         <Pressable
           onPress={handlePay}
           disabled={paying}
           style={({ pressed }) => ({
-            backgroundColor: '#1A73E8',
-            paddingVertical: 16,
-            borderRadius: 14,
-            alignItems: 'center',
-            opacity: paying || pressed ? 0.7 : 1,
-            marginTop: 8,
+            backgroundColor: '#1A73E8', paddingVertical: 16, borderRadius: 14,
+            alignItems: 'center', opacity: paying || pressed ? 0.7 : 1, marginTop: 8,
           })}
         >
           <Text style={{ color: '#fff', fontWeight: '800', fontSize: 16 }}>
@@ -320,57 +275,18 @@ export default function ReservationSummaryScreen() {
   );
 }
 
-function Row({
-  label,
-  value,
-  highlight = false,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-}) {
+function Row({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
   return (
-    <View
-      style={{
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        paddingVertical: 4,
-      }}
-    >
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 }}>
       <Text style={{ fontSize: 13, color: '#777', flex: 1 }}>{label}</Text>
-      <Text
-        style={{
-          fontSize: highlight ? 16 : 13,
-          fontWeight: highlight ? '800' : '600',
-          color: highlight ? '#007AFF' : '#111',
-          textAlign: 'right',
-          flexShrink: 1,
-        }}
-      >
+      <Text style={{ fontSize: highlight ? 16 : 13, fontWeight: highlight ? '800' : '600', color: highlight ? '#007AFF' : '#111', textAlign: 'right', flexShrink: 1 }}>
         {value}
       </Text>
     </View>
   );
 }
 
-const card = {
-  backgroundColor: '#fff',
-  padding: 16,
-  borderRadius: 16,
-  marginBottom: 16,
-  elevation: 2,
-  shadowColor: '#000',
-  shadowOpacity: 0.05,
-  shadowRadius: 6,
-  shadowOffset: { width: 0, height: 2 },
-};
+const card = { backgroundColor: '#fff', padding: 16, borderRadius: 16, marginBottom: 16, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } };
 const sectionTitle = { fontSize: 16, fontWeight: '700' as const, marginBottom: 8 };
 const fieldLabel = { fontSize: 13, color: '#666', marginTop: 10, marginBottom: 2 };
-const input = {
-  backgroundColor: '#F2F4F8',
-  borderRadius: 10,
-  paddingHorizontal: 12,
-  paddingVertical: 10,
-  fontSize: 14,
-};
+const input = { backgroundColor: '#F2F4F8', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 };

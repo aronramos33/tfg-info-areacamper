@@ -1,18 +1,12 @@
 import React, { createContext, useContext, useState } from 'react';
 import { Vehicle } from '@/components/utils/vehicle';
 
-export type TravelerDraft = {
+export type GuestDraft = {
   full_name: string;
   doc_type: 'dni' | 'nie' | 'passport';
   doc_number: string;
-  doc_support_number: string;
   nationality: string;
-  birth_date: string; // YYYY-MM-DD
-  gender: 'm' | 'f' | 'other';
-  country_of_residence: string;
-  city_of_residence: string;
-  phone: string;
-  email: string;
+  birth_date: string; // DD/MM/AAAA (se normaliza al guardar)
 };
 
 export type NewVehicleDraft = {
@@ -28,9 +22,11 @@ export type VehicleSelection =
   | { type: 'new'; draft: NewVehicleDraft; savedVehicle?: Vehicle };
 
 export type PlaceConfig = {
-  traveler: TravelerDraft;
   vehicleSelection: VehicleSelection | null;
-  extras: { extra_id: number; quantity: number }[];
+  numGuests: number;     // mínimo 1
+  numPets: number;       // → extra PET
+  electricidad: boolean; // → extra POWER
+  guests: GuestDraft[];  // uno por acompañante
 };
 
 export type HolderDraft = {
@@ -49,24 +45,24 @@ export type PendingReservation = {
   nightlyCents: number;
 };
 
-export function emptyTraveler(): TravelerDraft {
+export function emptyGuest(): GuestDraft {
   return {
     full_name: '',
     doc_type: 'dni',
     doc_number: '',
-    doc_support_number: '',
     nationality: 'ES',
     birth_date: '',
-    gender: 'm',
-    country_of_residence: '',
-    city_of_residence: '',
-    phone: '',
-    email: '',
   };
 }
 
 export function emptyPlaceConfig(): PlaceConfig {
-  return { traveler: emptyTraveler(), vehicleSelection: null, extras: [] };
+  return {
+    vehicleSelection: null,
+    numGuests: 1,
+    numPets: 0,
+    electricidad: false,
+    guests: [emptyGuest()],
+  };
 }
 
 const emptyPending: PendingReservation = {
