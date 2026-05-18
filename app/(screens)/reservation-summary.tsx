@@ -167,6 +167,11 @@ export default function ReservationSummaryScreen() {
         return;
       }
 
+      // Store session_id in context BEFORE opening the browser.
+      // success.tsx uses this as fallback when deep-link params don't arrive
+      // correctly in Expo Go (known issue with WebBrowser + useLocalSearchParams).
+      setPending(prev => ({ ...prev, checkoutSessionId: fnData.session_id as string }));
+
       await WebBrowser.openBrowserAsync(fnData.url);
       // The deep link (stripe-success → EXPO_GO_BASE_URL/success?session_id=...) handles
       // the navigation to success.tsx. No explicit push needed here.

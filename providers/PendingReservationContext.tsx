@@ -43,6 +43,7 @@ export type PendingReservation = {
   selectedPlaceIds: number[];
   holder: HolderDraft;
   nightlyCents: number;
+  checkoutSessionId: string; // guardado antes de abrir Stripe para que success.tsx lo use
 };
 
 export function emptyGuest(): GuestDraft {
@@ -73,6 +74,7 @@ const emptyPending: PendingReservation = {
   selectedPlaceIds: [],
   holder: { full_name: '', phone: '', dni: '' },
   nightlyCents: 1500,
+  checkoutSessionId: '',
 };
 
 interface PendingCtx {

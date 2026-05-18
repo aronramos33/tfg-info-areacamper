@@ -48,13 +48,14 @@ function formatDate(d: string | null) {
 
 export default function SuccessPage() {
   const router = useRouter();
-  const { session_id, mode } = useLocalSearchParams<{
-    session_id?: string;
-    mode?: string;
-  }>();
-  const isModify = mode === 'modify';
+  const params = useLocalSearchParams<{ session_id?: string; mode?: string }>();
+  const isModify = params.mode === 'modify';
   const { pending, resetPending } = usePendingReservation();
   const travelersSaved = useRef(false);
+
+  // Use URL param first; fall back to context (Expo Go deep-link params can be lost
+  // when WebBrowser is open — the context value is stored before opening Stripe).
+  const session_id = params.session_id || pending.checkoutSessionId || undefined;
 
   const [reservation, setReservation] = useState<ReservationRow | null>(null);
   const [loading, setLoading] = useState(true);
