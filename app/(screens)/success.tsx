@@ -135,26 +135,37 @@ export default function SuccessPage() {
           // Save travelers from cfg.guests (one row per acompañante per plaza)
           if (!isModify && !travelersSaved.current && pending.placeConfigs.length > 0) {
             travelersSaved.current = true;
-            const rows = pending.placeConfigs.flatMap((cfg, placeIndex) =>
-              cfg.guests.map((g, guestIndex) => ({
-                reservation_id: reservationRow.id,
-                full_name: g.full_name,
-                doc_type: g.doc_type,
-                doc_number: g.doc_number,
-                nationality: g.nationality,
-                birth_date: normalizeBirthDate(g.birth_date),
-                gender: null,
-                place_index: placeIndex,
-                is_main_traveler: placeIndex === 0 && guestIndex === 0,
-                vehicle_id: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.id : null,
-                vehicle_brand: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.brand : null,
-                vehicle_model: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.model : null,
-                vehicle_plate: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.plate : null,
-                vehicle_alias: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.alias : null,
-                vehicle_length_m: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.length_m : null,
-              }))
-            );
-            supabase.from('travelers').insert(rows).then(() => resetPending());
+            try {
+              const rows = pending.placeConfigs.flatMap((cfg, placeIndex) =>
+                (cfg.guests ?? [])
+                  .filter(g => g.full_name?.trim())  // skip guests with no name
+                  .map((g, guestIndex) => ({
+                    reservation_id: reservationRow.id,
+                    full_name: g.full_name || null,
+                    doc_type: g.doc_type || null,
+                    doc_number: g.doc_number || null,
+                    nationality: g.nationality || null,
+                    birth_date: g.birth_date ? normalizeBirthDate(g.birth_date) : null,
+                    gender: null,
+                    place_index: placeIndex,
+                    is_main_traveler: placeIndex === 0 && guestIndex === 0,
+                    vehicle_id: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.id : null,
+                    vehicle_brand: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.brand : null,
+                    vehicle_model: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.model : null,
+                    vehicle_plate: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.plate : null,
+                    vehicle_alias: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.alias : null,
+                    vehicle_length_m: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.length_m : null,
+                  }))
+              );
+              if (rows.length > 0) {
+                supabase.from('travelers').insert(rows).then(() => resetPending());
+              } else {
+                resetPending();
+              }
+            } catch (e) {
+              console.warn('travelers insert error:', e);
+              resetPending();
+            }
           }
           return;
         }
