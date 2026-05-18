@@ -179,19 +179,22 @@ export default function ReservationSummaryScreen() {
       const redirectBase = Linking.createURL('/');
       const result = await WebBrowser.openAuthSessionAsync(fnData.url, redirectBase);
 
+      // Extract session_id: try from result URL first, fall back to context
+      let sid = sessionId;
       if (result.type === 'success' && result.url) {
-        // Payment completed — extract session_id from redirect URL or use context
-        let sid = sessionId;
         try {
           const parsed = new URL(result.url);
           sid = parsed.searchParams.get('session_id') || sessionId;
         } catch {}
-        router.push({ pathname: '/(screens)/success', params: { session_id: sid } });
-      } else if (result.type === 'dismiss' && sessionId) {
-        // Android: browser dismissed after redirect (no 'success' type on some versions)
-        router.push({ pathname: '/(screens)/success', params: { session_id: sessionId } });
       }
-      // type === 'cancel': user closed browser without paying → stay on summary
+
+      // Navigate to success regardless of result type as long as we have a session_id.
+      // - 'success': redirect intercepted correctly
+      // - 'dismiss': Android or redirect not intercepted but payment may have gone through
+      // - 'cancel': user may have genuinely cancelled; success.tsx will timeout gracefully
+      // In all cases success.tsx uses the session_id to poll — if no reservation found
+      // after 60s it shows a friendly timeout screen with "Ir a mis reservas".
+      router.push({ pathname: '/(screens)/success', params: { session_id: sid } });
     } catch {
       Alert.alert('Error', 'Ha ocurrido un problema al crear la reserva.');
     } finally {
