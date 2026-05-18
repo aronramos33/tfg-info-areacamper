@@ -63,10 +63,11 @@ function emptyLocal(): LocalPlaceState {
 
 function configToLocal(cfg: PlaceConfig): LocalPlaceState {
   const local = emptyLocal();
-  local.numGuests = cfg.numGuests;
-  local.numPets = cfg.numPets;
-  local.electricidad = cfg.electricidad;
-  local.guests = cfg.guests.length > 0 ? [...cfg.guests] : [emptyGuest()];
+  local.numGuests = cfg.numGuests ?? 1;
+  local.numPets = cfg.numPets ?? 0;
+  local.electricidad = cfg.electricidad ?? false;
+  const guestList = cfg.guests ?? [];
+  local.guests = guestList.length > 0 ? [...guestList] : [emptyGuest()];
   if (cfg.vehicleSelection?.type === 'saved') {
     local.selectedVehicleId = cfg.vehicleSelection.vehicle.id;
   }
