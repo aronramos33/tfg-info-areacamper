@@ -167,15 +167,9 @@ export default function ReservationSummaryScreen() {
         return;
       }
 
-      const sessionId = fnData.session_id as string;
       await WebBrowser.openBrowserAsync(fnData.url);
-
-      // After browser closes, navigate explicitly to success with the known session_id.
-      // This is a fallback for when the deep link doesn't fire correctly in Expo Go.
-      router.push({
-        pathname: '/(screens)/success',
-        params: { session_id: sessionId },
-      });
+      // The deep link (stripe-success → EXPO_GO_BASE_URL/success?session_id=...) handles
+      // the navigation to success.tsx. No explicit push needed here.
     } catch {
       Alert.alert('Error', 'Ha ocurrido un problema al crear la reserva.');
     } finally {
