@@ -23,10 +23,6 @@ type ReservationRow = {
   vehicle_model: string | null;
   vehicle_plate: string | null;
   vehicle_alias: string | null;
-  reservation_extras: Array<{
-    quantity: number;
-    extras: { name_es: string } | null;
-  }>;
 };
 
 function formatEuro(cents: number) {
@@ -104,26 +100,30 @@ export default function SuccessPage() {
         if (!isMounted) return;
 
         if (pay && pay.status === 'completed' && pay.reservation_id) {
-          const { data: r } = await supabase
+          const { data: r, error: rErr } = await supabase
             .from('reservations')
             .select(
-              'id,start_date,end_date,total_amount_cents,payment_status,access_code,full_name,vehicle_brand,vehicle_model,vehicle_plate,vehicle_alias,reservation_extras(quantity,extras(name_es))',
+              'id,start_date,end_date,total_amount_cents,payment_status,access_code,full_name,vehicle_brand,vehicle_model,vehicle_plate,vehicle_alias',
             )
             .eq('id', pay.reservation_id)
             .maybeSingle();
+          if (rErr) console.warn('[success] modify lookup error:', rErr);
           if (r) setReservation(r as unknown as ReservationRow);
           setLoading(false);
           clearInterval(timer);
           return;
         }
       } else {
-        const { data } = await supabase
+        const { data, error: pollErr } = await supabase
           .from('reservations')
           .select(
-            'id,start_date,end_date,total_amount_cents,payment_status,access_code,full_name,vehicle_brand,vehicle_model,vehicle_plate,vehicle_alias,reservation_extras(quantity,extras(name_es))',
+            'id,start_date,end_date,total_amount_cents,payment_status,access_code,full_name,vehicle_brand,vehicle_model,vehicle_plate,vehicle_alias',
           )
           .eq('checkout_session_id', session_id)
           .maybeSingle();
+
+        if (pollErr) console.warn('[success] poll error:', JSON.stringify(pollErr));
+        if (!data) console.log('[success] tick', ticks, 'session_id:', session_id, 'no data yet');
 
         if (!isMounted) return;
 
@@ -263,21 +263,6 @@ export default function SuccessPage() {
                     {[reservation.vehicle_alias ?? `${reservation.vehicle_brand ?? ''} ${reservation.vehicle_model ?? ''}`.trim(), reservation.vehicle_plate]
                       .filter(Boolean)
                       .join(' · ')}
-                  </Text>
-                </View>
-              )}
-              {reservation.reservation_extras.length > 0 && (
-                <View style={styles.row}>
-                  <Text style={styles.label}>Extras</Text>
-                  <Text style={styles.value} numberOfLines={2}>
-                    {reservation.reservation_extras
-                      .map((e) =>
-                        e.quantity > 1
-                          ? `${e.extras?.name_es} ×${e.quantity}`
-                          : e.extras?.name_es,
-                      )
-                      .filter(Boolean)
-                      .join(', ')}
                   </Text>
                 </View>
               )}
