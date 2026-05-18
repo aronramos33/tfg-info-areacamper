@@ -11,6 +11,7 @@ import {
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 import dayjs from 'dayjs';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
@@ -167,14 +168,30 @@ export default function ReservationSummaryScreen() {
         return;
       }
 
-      // Store session_id in context BEFORE opening the browser.
-      // success.tsx uses this as fallback when deep-link params don't arrive
-      // correctly in Expo Go (known issue with WebBrowser + useLocalSearchParams).
-      setPending(prev => ({ ...prev, checkoutSessionId: fnData.session_id as string }));
+      const sessionId = fnData.session_id as string;
+      // Store in context as fallback
+      setPending(prev => ({ ...prev, checkoutSessionId: sessionId }));
 
-      await WebBrowser.openBrowserAsync(fnData.url);
-      // The deep link (stripe-success → EXPO_GO_BASE_URL/success?session_id=...) handles
-      // the navigation to success.tsx. No explicit push needed here.
+      // openAuthSessionAsync intercepts the stripe-success deep link redirect,
+      // closes the browser cleanly, and returns the URL — without triggering
+      // Expo Router's automatic deep link navigation (which crashed with the
+      // (screens) modal Stack having 4 screens pushed).
+      const redirectBase = Linking.createURL('/');
+      const result = await WebBrowser.openAuthSessionAsync(fnData.url, redirectBase);
+
+      if (result.type === 'success' && result.url) {
+        // Payment completed — extract session_id from redirect URL or use context
+        let sid = sessionId;
+        try {
+          const parsed = new URL(result.url);
+          sid = parsed.searchParams.get('session_id') || sessionId;
+        } catch {}
+        router.push({ pathname: '/(screens)/success', params: { session_id: sid } });
+      } else if (result.type === 'dismiss' && sessionId) {
+        // Android: browser dismissed after redirect (no 'success' type on some versions)
+        router.push({ pathname: '/(screens)/success', params: { session_id: sessionId } });
+      }
+      // type === 'cancel': user closed browser without paying → stay on summary
     } catch {
       Alert.alert('Error', 'Ha ocurrido un problema al crear la reserva.');
     } finally {
