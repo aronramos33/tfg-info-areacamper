@@ -90,6 +90,7 @@ export default function QrScreen() {
           'id,user_id,start_date,end_date,status,payment_status,total_amount_cents,access_code,access_expires_at,created_at,modified_at,cancelled_at',
         )
         .eq('user_id', userId)
+        .neq('status', 'pending')
         .order('start_date', { ascending: true });
 
       if (!alive) return;

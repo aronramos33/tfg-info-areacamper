@@ -27,6 +27,16 @@ import {
   isModifiable,
 } from '@/components/utils/reservationModification';
 
+type VehicleSnapshot = {
+  place_index: number;
+  vehicle_id: number | null;
+  brand: string;
+  model: string;
+  plate: string;
+  alias?: string | null;
+  length_m?: number | null;
+};
+
 type ReservationDetail = {
   id: number;
   start_date: string;
@@ -42,11 +52,14 @@ type ReservationDetail = {
   modified_at: string | null;
   cancelled_at: string | null;
   access_code: string | null;
+  // Legacy single-vehicle fields (kept for backward compat with old reservations)
   vehicle_brand: string | null;
   vehicle_model: string | null;
   vehicle_plate: string | null;
   vehicle_alias: string | null;
   vehicle_length_m: number | null;
+  // Multi-vehicle snapshot (new reservations)
+  vehicles_snapshot: VehicleSnapshot[];
 };
 
 type ExtraLine = {
@@ -70,9 +83,6 @@ type TravelerRow = {
   city_of_residence: string | null;
   phone: string | null;
   email: string | null;
-  vehicle_plate: string | null;
-  vehicle_brand: string | null;
-  vehicle_model: string | null;
 };
 
 function formatEuro(cents?: number | null) {
@@ -95,6 +105,7 @@ export default function ReservationDetailUserScreen() {
   const [travelers, setTravelers] = useState<TravelerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const load = useCallback(async () => {
     if (!reservationId || !session?.user?.id) return;
@@ -102,7 +113,7 @@ export default function ReservationDetailUserScreen() {
     const { data: r } = await supabase
       .from('reservations')
       .select(
-        'id,start_date,end_date,status,payment_status,num_places,place_ids,nightly_amount_cents,total_amount_cents,refund_amount_cents,refund_id,modified_at,cancelled_at,access_code,vehicle_brand,vehicle_model,vehicle_plate,vehicle_alias,vehicle_length_m',
+        'id,start_date,end_date,status,payment_status,num_places,place_ids,nightly_amount_cents,total_amount_cents,refund_amount_cents,refund_id,modified_at,cancelled_at,access_code,vehicle_brand,vehicle_model,vehicle_plate,vehicle_alias,vehicle_length_m,vehicles_snapshot',
       )
       .eq('id', Number(reservationId))
       .eq('user_id', session.user.id)
@@ -116,6 +127,28 @@ export default function ReservationDetailUserScreen() {
     }
     setReservation(r as ReservationDetail);
 
+    // Si está pendiente de confirmación (webhook aún no disparó), poll hasta confirmar
+    if ((r as ReservationDetail).status === 'pending') {
+      setConfirming(true);
+      setLoading(false);
+      const interval = setInterval(async () => {
+        const { data: updated } = await supabase
+          .from('reservations')
+          .select('id,start_date,end_date,status,payment_status,num_places,place_ids,nightly_amount_cents,total_amount_cents,refund_amount_cents,refund_id,modified_at,cancelled_at,access_code,vehicle_brand,vehicle_model,vehicle_plate,vehicle_alias,vehicle_length_m,vehicles_snapshot')
+          .eq('id', Number(reservationId))
+          .eq('user_id', session!.user.id)
+          .maybeSingle();
+        if (updated && (updated as ReservationDetail).status !== 'pending') {
+          setReservation(updated as ReservationDetail);
+          setConfirming(false);
+          clearInterval(interval);
+        }
+      }, 2000);
+      // Timeout máximo 60s
+      setTimeout(() => { clearInterval(interval); setConfirming(false); }, 60000);
+      return;
+    }
+
     const [extrasRes, travelersRes] = await Promise.all([
       supabase
         .from('reservation_extras')
@@ -123,7 +156,7 @@ export default function ReservationDetailUserScreen() {
         .eq('reservation_id', Number(reservationId)),
       supabase
         .from('travelers')
-        .select('id, place_index, full_name, doc_type, doc_number, nationality, birth_date, gender, country_of_residence, city_of_residence, phone, email, vehicle_plate, vehicle_brand, vehicle_model')
+        .select('id, place_index, full_name, doc_type, doc_number, nationality, birth_date, gender, country_of_residence, city_of_residence, phone, email')
         .eq('reservation_id', Number(reservationId))
         .order('place_index', { ascending: true }),
     ]);
@@ -209,11 +242,25 @@ export default function ReservationDetailUserScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F7F8FB' }}>
       <ScrollView contentContainerStyle={styles.container}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+        <Pressable
+          onPress={() =>
+            router.canGoBack() ? router.back() : router.replace('/(main)/qr')
+          }
+          style={styles.backBtn}
+        >
           <Text style={styles.backText}>‹ Volver</Text>
         </Pressable>
 
         <Text style={styles.title}>Reserva #{reservation.id}</Text>
+
+        {confirming && (
+          <View style={{ backgroundColor: '#EAF4FF', borderRadius: 12, padding: 14, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <ActivityIndicator size="small" color="#1A73E8" />
+            <Text style={{ color: '#1A73E8', fontWeight: '600', fontSize: 13 }}>
+              Confirmando pago… esto solo tarda unos segundos.
+            </Text>
+          </View>
+        )}
 
         <View style={styles.badgeRow}>
           <View
@@ -255,23 +302,45 @@ export default function ReservationDetailUserScreen() {
           )}
         </View>
 
-        {/* Vehículo */}
+        {/* Vehículos */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>🚐 Vehículo</Text>
-          {reservation.vehicle_alias && (
-            <Row label="Alias" value={reservation.vehicle_alias} />
-          )}
-          <Row
-            label="Marca y modelo"
-            value={
-              [reservation.vehicle_brand, reservation.vehicle_model]
-                .filter(Boolean)
-                .join(' ') || '—'
-            }
-          />
-          <Row label="Matrícula" value={reservation.vehicle_plate ?? '—'} />
-          {reservation.vehicle_length_m != null && (
-            <Row label="Longitud" value={`${reservation.vehicle_length_m} m`} />
+          <Text style={styles.cardTitle}>🚐 Vehículo{(reservation.vehicles_snapshot?.length ?? 0) > 1 ? 's' : ''}</Text>
+          {(reservation.vehicles_snapshot?.length ?? 0) > 0 ? (
+            reservation.vehicles_snapshot.map((v, i) => (
+              <View key={i} style={{ marginBottom: i < reservation.vehicles_snapshot.length - 1 ? 10 : 0 }}>
+                {reservation.vehicles_snapshot.length > 1 && (
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#888', marginBottom: 4 }}>
+                    Plaza {v.place_index + 1}
+                  </Text>
+                )}
+                {v.alias ? <Row label="Alias" value={v.alias} /> : null}
+                <Row
+                  label="Marca y modelo"
+                  value={[v.brand, v.model].filter(Boolean).join(' ') || '—'}
+                />
+                <Row label="Matrícula" value={v.plate || '—'} />
+                {v.length_m != null && <Row label="Longitud" value={`${v.length_m} m`} />}
+              </View>
+            ))
+          ) : (
+            // Fallback para reservas antiguas sin vehicles_snapshot
+            <>
+              {reservation.vehicle_alias && (
+                <Row label="Alias" value={reservation.vehicle_alias} />
+              )}
+              <Row
+                label="Marca y modelo"
+                value={
+                  [reservation.vehicle_brand, reservation.vehicle_model]
+                    .filter(Boolean)
+                    .join(' ') || '—'
+                }
+              />
+              <Row label="Matrícula" value={reservation.vehicle_plate ?? '—'} />
+              {reservation.vehicle_length_m != null && (
+                <Row label="Longitud" value={`${reservation.vehicle_length_m} m`} />
+              )}
+            </>
           )}
         </View>
 
@@ -304,12 +373,6 @@ export default function ReservationDetailUserScreen() {
                 <Row label="Documento" value={`${t.doc_type.toUpperCase()} ${t.doc_number}`} />
                 <Row label="Nacionalidad" value={t.nationality} />
                 <Row label="Nacimiento" value={t.birth_date} />
-                {t.vehicle_plate && (
-                  <Row
-                    label="Vehículo"
-                    value={[t.vehicle_brand, t.vehicle_model, t.vehicle_plate].filter(Boolean).join(' · ')}
-                  />
-                )}
               </View>
             ))}
           </View>

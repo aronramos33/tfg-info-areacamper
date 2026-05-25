@@ -38,10 +38,14 @@ type Extra = {
 };
 
 type LocalPlaceState = {
+  // Plaza 0 (usuario): vehículo guardado en la BD
   selectedVehicleId: number | null;
   showNewVehicleForm: boolean;
   newVehicle: { brand: string; model: string; plate: string; alias: string; length_m: string };
   savingVehicle: boolean;
+  // Plaza 1+ (acompañante): vehículo escrito sin guardar en BD
+  companionVehicle: { brand: string; model: string; plate: string; alias: string; length_m: string };
+  companionVehicleConfirmed: boolean;
   numGuests: number;
   numPets: number;
   electricidad: boolean;
@@ -54,6 +58,8 @@ function emptyLocal(): LocalPlaceState {
     showNewVehicleForm: false,
     newVehicle: { brand: '', model: '', plate: '', alias: '', length_m: '' },
     savingVehicle: false,
+    companionVehicle: { brand: '', model: '', plate: '', alias: '', length_m: '' },
+    companionVehicleConfirmed: false,
     numGuests: 1,
     numPets: 0,
     electricidad: false,
@@ -70,6 +76,9 @@ function configToLocal(cfg: PlaceConfig): LocalPlaceState {
   local.guests = guestList.length > 0 ? [...guestList] : [emptyGuest()];
   if (cfg.vehicleSelection?.type === 'saved') {
     local.selectedVehicleId = cfg.vehicleSelection.vehicle.id;
+  } else if (cfg.vehicleSelection?.type === 'new') {
+    local.companionVehicle = { ...cfg.vehicleSelection.draft };
+    local.companionVehicleConfirmed = !!cfg.vehicleSelection.draft.plate.trim();
   }
   return local;
 }
@@ -86,6 +95,7 @@ export default function ConfigurePlacesScreen() {
   const [placeStates, setPlaceStates] = useState<LocalPlaceState[]>([]);
   const [activePlaza, setActivePlaza] = useState(0);
   const profileApplied = useRef(false);
+  const scrollRef = useRef<ScrollView>(null);
 
   const numPlaces = pending.numPlaces;
 
@@ -107,7 +117,7 @@ export default function ConfigurePlacesScreen() {
       const states = Array.from({ length: numPlaces }, (_, i) => {
         const existing = pending.placeConfigs[i];
         const local = existing ? configToLocal(existing) : emptyLocal();
-        if (vList.length === 1 && !local.selectedVehicleId) {
+        if (i === 0 && vList.length === 1 && !local.selectedVehicleId) {
           local.selectedVehicleId = vList[0].id;
         }
         return local;
@@ -117,11 +127,9 @@ export default function ConfigurePlacesScreen() {
       if (!profileApplied.current && profile && states[0].guests[0].full_name === '') {
         profileApplied.current = true;
         states[0].guests[0] = {
+          ...emptyGuest(),
           full_name: profile.full_name ?? '',
-          doc_type: 'dni',
           doc_number: profile.dni ?? '',
-          nationality: 'ES',
-          birth_date: '',
         };
       }
 
@@ -135,6 +143,9 @@ export default function ConfigurePlacesScreen() {
 
   const updatePlaza = <K extends keyof LocalPlaceState>(idx: number, key: K, val: LocalPlaceState[K]) =>
     setPlaceStates(prev => prev.map((s, i) => i === idx ? { ...s, [key]: val } : s));
+
+  const updateCompanionVehicle = (idx: number, key: keyof LocalPlaceState['companionVehicle'], val: string) =>
+    setPlaceStates(prev => prev.map((s, i) => i === idx ? { ...s, companionVehicle: { ...s.companionVehicle, [key]: val } } : s));
 
   const updateGuest = (plazaIdx: number, guestIdx: number, key: keyof GuestDraft, val: string) =>
     setPlaceStates(prev => prev.map((s, i) => {
@@ -162,7 +173,6 @@ export default function ConfigurePlacesScreen() {
 
   const addPlaza = () => {
     const newLocal = emptyLocal();
-    if (vehicles.length === 1) newLocal.selectedVehicleId = vehicles[0].id;
     setPlaceStates(prev => [...prev, newLocal]);
     setPending(prev => ({ ...prev, numPlaces: prev.numPlaces + 1 }));
     setActivePlaza(placeStates.length);
@@ -212,43 +222,77 @@ export default function ConfigurePlacesScreen() {
       : s));
   };
 
+  const scrollToTop = () => scrollRef.current?.scrollTo({ y: 0, animated: false });
+
   const handleNext = () => {
     if (activePlaza < placeStates.length - 1) {
       setActivePlaza(activePlaza + 1);
+      scrollToTop();
       return;
     }
     // Last plaza → validate all and continue
     for (let i = 0; i < placeStates.length; i++) {
       const s = placeStates[i];
-      if (!s.selectedVehicleId) {
-        Alert.alert('Vehículo requerido', `Plaza ${i + 1}: selecciona un vehículo.`);
-        setActivePlaza(i);
-        return;
+
+      // Vehicle validation
+      if (i === 0) {
+        if (!s.selectedVehicleId) {
+          Alert.alert('Vehículo requerido', 'Plaza 1: selecciona tu vehículo.');
+          setActivePlaza(0);
+          return;
+        }
+      } else {
+        if (!s.companionVehicle.plate.trim()) {
+          Alert.alert('Matrícula requerida', `Plaza ${i + 1}: indica la matrícula del vehículo del acompañante.`);
+          setActivePlaza(i);
+          return;
+        }
       }
+
+      // Guest validation
       for (let j = 0; j < s.guests.length; j++) {
         const g = s.guests[j];
+        const label = `Plaza ${i + 1}, Viajero ${j + 1}`;
+
         if (!g.full_name.trim()) {
-          Alert.alert('Nombre requerido', `Plaza ${i + 1}, Acompañante ${j + 1}: indica el nombre.`);
-          setActivePlaza(i);
-          return;
+          Alert.alert('Nombre requerido', `${label}: indica el nombre completo.`);
+          setActivePlaza(i); return;
         }
         if (!g.doc_number.trim()) {
-          Alert.alert('Documento requerido', `Plaza ${i + 1}, Acompañante ${j + 1}: indica el nº de documento.`);
-          setActivePlaza(i);
-          return;
+          Alert.alert('Documento requerido', `${label}: indica el nº de documento.`);
+          setActivePlaza(i); return;
         }
+        // Validar fecha DD/MM/AAAA
         if (!g.birth_date.trim()) {
-          Alert.alert('Fecha requerida', `Plaza ${i + 1}, Acompañante ${j + 1}: indica la fecha de nacimiento.`);
-          setActivePlaza(i);
-          return;
+          Alert.alert('Fecha requerida', `${label}: indica la fecha de nacimiento.`);
+          setActivePlaza(i); return;
+        }
+        const dateOk = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.test(g.birth_date.trim());
+        if (!dateOk) {
+          Alert.alert('Formato de fecha', `${label}: usa el formato DD/MM/AAAA (ej. 15/06/1990).`);
+          setActivePlaza(i); return;
+        }
+        const [dd, mm, yyyy] = g.birth_date.trim().split('/').map(Number);
+        if (mm < 1 || mm > 12 || dd < 1 || dd > 31 || yyyy < 1900 || yyyy > new Date().getFullYear()) {
+          Alert.alert('Fecha inválida', `${label}: comprueba que la fecha de nacimiento es correcta.`);
+          setActivePlaza(i); return;
+        }
+        // Email básico (si se rellena)
+        if (g.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(g.email.trim())) {
+          Alert.alert('Email inválido', `${label}: el email no tiene un formato válido.`);
+          setActivePlaza(i); return;
         }
       }
     }
 
-    const placeConfigs: PlaceConfig[] = placeStates.map(s => ({
-      vehicleSelection: vehicles.find(v => v.id === s.selectedVehicleId)
-        ? { type: 'saved', vehicle: vehicles.find(v => v.id === s.selectedVehicleId)! }
-        : null,
+    const placeConfigs: PlaceConfig[] = placeStates.map((s, i) => ({
+      vehicleSelection: i === 0
+        ? (vehicles.find(v => v.id === s.selectedVehicleId)
+            ? { type: 'saved' as const, vehicle: vehicles.find(v => v.id === s.selectedVehicleId)! }
+            : null)
+        : (s.companionVehicle.plate.trim()
+            ? { type: 'new' as const, draft: s.companionVehicle }
+            : null),
       numGuests: s.numGuests,
       numPets: s.numPets,
       electricidad: s.electricidad,
@@ -271,6 +315,7 @@ export default function ConfigurePlacesScreen() {
   if (!s) return null;
 
   const isLastPlaza = activePlaza === placeStates.length - 1;
+  const isMainPlaza = activePlaza === 0;
   const atLimit = s.numGuests >= 6;
 
   return (
@@ -286,7 +331,7 @@ export default function ConfigurePlacesScreen() {
         {placeStates.map((_, i) => (
           <Pressable
             key={i}
-            onPress={() => setActivePlaza(i)}
+            onPress={() => { setActivePlaza(i); scrollToTop(); }}
             style={{
               flexDirection: 'row', alignItems: 'center', gap: 4,
               paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
@@ -311,64 +356,145 @@ export default function ConfigurePlacesScreen() {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}>
+      <ScrollView ref={scrollRef} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}>
 
         {/* ── VEHÍCULO ── */}
         <Text style={groupLabel}>Vehículo</Text>
-        {vehicles.map(v => {
-          const sel = s.selectedVehicleId === v.id;
-          return (
-            <Pressable
-              key={v.id}
-              onPress={() => updatePlaza(activePlaza, 'selectedVehicleId', v.id)}
-              style={{
-                borderRadius: 12, padding: 14, marginBottom: 8,
-                backgroundColor: sel ? '#111' : '#fff',
-                flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-              }}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <Text style={{ fontSize: 20 }}>🚐</Text>
-                <View>
-                  <Text style={{ fontWeight: '700', fontSize: 14, color: sel ? '#fff' : '#111' }}>
-                    {vehicleDisplayName(v)}
-                  </Text>
-                  <Text style={{ color: sel ? '#ccc' : '#888', fontSize: 12 }}>{v.plate}</Text>
+
+        {isMainPlaza ? (
+          // Plaza 0: selección de vehículo guardado del usuario
+          <>
+            {vehicles.map(v => {
+              const sel = s.selectedVehicleId === v.id;
+              return (
+                <Pressable
+                  key={v.id}
+                  onPress={() => updatePlaza(activePlaza, 'selectedVehicleId', v.id)}
+                  style={{
+                    borderRadius: 12, padding: 14, marginBottom: 8,
+                    backgroundColor: sel ? '#111' : '#fff',
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <Text style={{ fontSize: 20 }}>🚐</Text>
+                    <View>
+                      <Text style={{ fontWeight: '700', fontSize: 14, color: sel ? '#fff' : '#111' }}>
+                        {vehicleDisplayName(v)}
+                      </Text>
+                      <Text style={{ color: sel ? '#ccc' : '#888', fontSize: 12 }}>{v.plate}</Text>
+                    </View>
+                  </View>
+                  {sel && <Text style={{ color: '#fff', fontSize: 18 }}>✓</Text>}
+                </Pressable>
+              );
+            })}
+
+            {s.showNewVehicleForm ? (
+              <View style={{ borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, padding: 12, gap: 8, marginBottom: 8 }}>
+                <Text style={{ fontWeight: '700' }}>Nuevo vehículo</Text>
+                <TextInput value={s.newVehicle.brand} onChangeText={v => updateNewVehicleField(activePlaza, 'brand', v)} placeholder="Marca *" style={input} autoCapitalize="words" />
+                <TextInput value={s.newVehicle.model} onChangeText={v => updateNewVehicleField(activePlaza, 'model', v)} placeholder="Modelo *" style={input} />
+                <TextInput value={s.newVehicle.plate} onChangeText={v => updateNewVehicleField(activePlaza, 'plate', v)} placeholder="Matrícula * (1234ABC)" style={input} autoCapitalize="characters" autoCorrect={false} />
+                <TextInput value={s.newVehicle.alias} onChangeText={v => updateNewVehicleField(activePlaza, 'alias', v)} placeholder="Alias (opcional)" style={input} />
+                <TextInput value={s.newVehicle.length_m} onChangeText={v => updateNewVehicleField(activePlaza, 'length_m', v)} placeholder="Longitud en metros (opcional)" style={input} keyboardType="decimal-pad" />
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Pressable onPress={() => updatePlaza(activePlaza, 'showNewVehicleForm', false)} disabled={s.savingVehicle} style={{ flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: '#ddd', alignItems: 'center' }}>
+                    <Text style={{ fontWeight: '600' }}>Cancelar</Text>
+                  </Pressable>
+                  <Pressable onPress={() => saveNewVehicle(activePlaza)} disabled={s.savingVehicle} style={{ flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: '#1A73E8', alignItems: 'center' }}>
+                    <Text style={{ color: '#fff', fontWeight: '700' }}>{s.savingVehicle ? 'Guardando…' : 'Guardar y elegir'}</Text>
+                  </Pressable>
                 </View>
               </View>
-              {sel && <Text style={{ color: '#fff', fontSize: 18 }}>✓</Text>}
-            </Pressable>
-          );
-        })}
-
-        {s.showNewVehicleForm ? (
-          <View style={{ borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, padding: 12, gap: 8, marginBottom: 8 }}>
-            <Text style={{ fontWeight: '700' }}>Nuevo vehículo</Text>
-            <TextInput value={s.newVehicle.brand} onChangeText={v => updateNewVehicleField(activePlaza, 'brand', v)} placeholder="Marca *" style={input} autoCapitalize="words" />
-            <TextInput value={s.newVehicle.model} onChangeText={v => updateNewVehicleField(activePlaza, 'model', v)} placeholder="Modelo *" style={input} />
-            <TextInput value={s.newVehicle.plate} onChangeText={v => updateNewVehicleField(activePlaza, 'plate', v)} placeholder="Matrícula * (1234ABC)" style={input} autoCapitalize="characters" autoCorrect={false} />
-            <TextInput value={s.newVehicle.alias} onChangeText={v => updateNewVehicleField(activePlaza, 'alias', v)} placeholder="Alias (opcional)" style={input} />
-            <TextInput value={s.newVehicle.length_m} onChangeText={v => updateNewVehicleField(activePlaza, 'length_m', v)} placeholder="Longitud en metros (opcional)" style={input} keyboardType="decimal-pad" />
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Pressable onPress={() => updatePlaza(activePlaza, 'showNewVehicleForm', false)} disabled={s.savingVehicle} style={{ flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: '#ddd', alignItems: 'center' }}>
-                <Text style={{ fontWeight: '600' }}>Cancelar</Text>
+            ) : (
+              <Pressable onPress={() => updatePlaza(activePlaza, 'showNewVehicleForm', true)} style={{ paddingVertical: 12, borderRadius: 12, alignItems: 'center', marginBottom: 16 }}>
+                <Text style={{ color: '#1A73E8', fontWeight: '600' }}>+ Añadir vehículo nuevo</Text>
               </Pressable>
-              <Pressable onPress={() => saveNewVehicle(activePlaza)} disabled={s.savingVehicle} style={{ flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: '#1A73E8', alignItems: 'center' }}>
-                <Text style={{ color: '#fff', fontWeight: '700' }}>{s.savingVehicle ? 'Guardando…' : 'Guardar y elegir'}</Text>
-              </Pressable>
+            )}
+          </>
+        ) : s.companionVehicleConfirmed ? (
+          // Plaza 1+: card de vehículo confirmado (igual que saved vehicle en plaza 0)
+          <Pressable
+            onPress={() => updatePlaza(activePlaza, 'companionVehicleConfirmed', false)}
+            style={{
+              borderRadius: 12, padding: 14, marginBottom: 16,
+              backgroundColor: '#111',
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <Text style={{ fontSize: 20 }}>🚐</Text>
+              <View>
+                <Text style={{ fontWeight: '700', fontSize: 14, color: '#fff' }}>
+                  {s.companionVehicle.alias || [s.companionVehicle.brand, s.companionVehicle.model].filter(Boolean).join(' ') || 'Vehículo acompañante'}
+                </Text>
+                <Text style={{ color: '#ccc', fontSize: 12 }}>{s.companionVehicle.plate}</Text>
+              </View>
             </View>
-          </View>
-        ) : (
-          <Pressable onPress={() => updatePlaza(activePlaza, 'showNewVehicleForm', true)} style={{ paddingVertical: 12, borderRadius: 12, alignItems: 'center', marginBottom: 16 }}>
-            <Text style={{ color: '#1A73E8', fontWeight: '600' }}>+ Añadir vehículo nuevo</Text>
+            <Text style={{ color: '#aaa', fontSize: 12 }}>Editar</Text>
           </Pressable>
+        ) : (
+          // Plaza 1+: formulario libre para el vehículo del acompañante (no se guarda en BD)
+          <View style={{ borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, padding: 12, gap: 8, marginBottom: 16 }}>
+            <Text style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>
+              Datos del vehículo del acompañante. No se guardarán en tu perfil.
+            </Text>
+            <TextInput
+              value={s.companionVehicle.brand}
+              onChangeText={v => updateCompanionVehicle(activePlaza, 'brand', v)}
+              placeholder="Marca (opcional)"
+              style={input}
+              autoCapitalize="words"
+            />
+            <TextInput
+              value={s.companionVehicle.model}
+              onChangeText={v => updateCompanionVehicle(activePlaza, 'model', v)}
+              placeholder="Modelo (opcional)"
+              style={input}
+            />
+            <TextInput
+              value={s.companionVehicle.plate}
+              onChangeText={v => updateCompanionVehicle(activePlaza, 'plate', v)}
+              placeholder="Matrícula *"
+              style={input}
+              autoCapitalize="characters"
+              autoCorrect={false}
+            />
+            <TextInput
+              value={s.companionVehicle.alias}
+              onChangeText={v => updateCompanionVehicle(activePlaza, 'alias', v)}
+              placeholder="Alias (opcional)"
+              style={input}
+            />
+            <TextInput
+              value={s.companionVehicle.length_m}
+              onChangeText={v => updateCompanionVehicle(activePlaza, 'length_m', v)}
+              placeholder="Longitud en metros (opcional)"
+              style={input}
+              keyboardType="decimal-pad"
+            />
+            <Pressable
+              onPress={() => {
+                if (!s.companionVehicle.plate.trim()) {
+                  Alert.alert('Matrícula requerida', 'Indica la matrícula del vehículo.');
+                  return;
+                }
+                updatePlaza(activePlaza, 'companionVehicleConfirmed', true);
+              }}
+              style={{ backgroundColor: '#111', paddingVertical: 12, borderRadius: 10, alignItems: 'center', marginTop: 4 }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700' }}>Listo ✓</Text>
+            </Pressable>
+          </View>
         )}
 
-        {/* ── HUÉSPEDES ── */}
+        {/* ── CONTADORES ── */}
         <Text style={groupLabel}>Huéspedes de esta plaza</Text>
         <View style={card}>
           <CounterRow
-            label="Acompañantes"
+            label="Viajeros"
+            subtitle="Mín. 1. Se cobra extra a partir del 3º."
             value={s.numGuests}
             min={1}
             onDecrement={() => changeNumGuests(activePlaza, -1)}
@@ -399,8 +525,12 @@ export default function ConfigurePlacesScreen() {
           </View>
         )}
 
-        {/* ── DATOS DE LOS HUÉSPEDES ── */}
-        <Text style={[groupLabel, { marginTop: 8 }]}>Datos de los huéspedes</Text>
+        {/* ── DATOS DE LOS VIAJEROS ── */}
+        <Text style={[groupLabel, { marginTop: 8 }]}>Datos de los viajeros</Text>
+        <Text style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>
+          Necesarios para el registro SES. Mantén esta información actualizada.
+        </Text>
+
         {s.guests.map((g, gi) => {
           const isTitular = activePlaza === 0 && gi === 0;
           return (
@@ -408,11 +538,12 @@ export default function ConfigurePlacesScreen() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                 <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#111' }} />
                 <Text style={{ fontWeight: '700', fontSize: 14 }}>
-                  {isTitular ? 'Titular — ' : ''}Acompañante {gi + 1}
+                  {isTitular ? 'Titular — ' : ''}Viajero {gi + 1}
                 </Text>
               </View>
 
-              <Text style={fieldLabel}>Nombre</Text>
+              {/* Nombre */}
+              <Text style={fieldLabel}>Nombre completo *</Text>
               <TextInput
                 value={g.full_name}
                 onChangeText={v => updateGuest(activePlaza, gi, 'full_name', v)}
@@ -421,7 +552,8 @@ export default function ConfigurePlacesScreen() {
                 style={input}
               />
 
-              <Text style={fieldLabel}>Tipo doc.</Text>
+              {/* Tipo de documento */}
+              <Text style={fieldLabel}>Tipo de documento *</Text>
               <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
                 {(['dni', 'nie', 'passport'] as const).map(type => (
                   <Pressable
@@ -441,7 +573,8 @@ export default function ConfigurePlacesScreen() {
                 ))}
               </View>
 
-              <Text style={fieldLabel}>Nº documento</Text>
+              {/* Nº documento */}
+              <Text style={fieldLabel}>Nº documento *</Text>
               <TextInput
                 value={g.doc_number}
                 onChangeText={v => updateGuest(activePlaza, gi, 'doc_number', v)}
@@ -451,7 +584,19 @@ export default function ConfigurePlacesScreen() {
                 style={input}
               />
 
-              <Text style={fieldLabel}>F. nacimiento (DD/MM/AAAA)</Text>
+              {/* Nº soporte */}
+              <Text style={fieldLabel}>Nº soporte (opcional)</Text>
+              <TextInput
+                value={g.doc_support_number}
+                onChangeText={v => updateGuest(activePlaza, gi, 'doc_support_number', v)}
+                placeholder="Nº en el reverso del documento"
+                autoCapitalize="characters"
+                autoCorrect={false}
+                style={input}
+              />
+
+              {/* Fecha de nacimiento */}
+              <Text style={fieldLabel}>Fecha de nacimiento * (DD/MM/AAAA)</Text>
               <TextInput
                 value={g.birth_date}
                 onChangeText={v => updateGuest(activePlaza, gi, 'birth_date', v)}
@@ -460,12 +605,76 @@ export default function ConfigurePlacesScreen() {
                 style={input}
               />
 
-              <Text style={fieldLabel}>Nacionalidad</Text>
+              {/* Género */}
+              <Text style={fieldLabel}>Género</Text>
+              <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
+                {([['m', 'Hombre'], ['f', 'Mujer'], ['other', 'Otro']] as const).map(([val, label]) => (
+                  <Pressable
+                    key={val}
+                    onPress={() => updateGuest(activePlaza, gi, 'gender', val)}
+                    style={{
+                      flex: 1, paddingVertical: 8, borderRadius: 8, borderWidth: 1.5,
+                      borderColor: g.gender === val ? '#1A73E8' : '#E5E7EB',
+                      backgroundColor: g.gender === val ? '#EAF1FE' : '#fff',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Text style={{ fontWeight: '600', fontSize: 11, color: g.gender === val ? '#1A73E8' : '#555' }}>
+                      {label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              {/* Nacionalidad */}
+              <Text style={fieldLabel}>Nacionalidad *</Text>
               <TextInput
                 value={g.nationality}
                 onChangeText={v => updateGuest(activePlaza, gi, 'nationality', v)}
                 placeholder="ES"
                 autoCapitalize="characters"
+                autoCorrect={false}
+                style={input}
+              />
+
+              {/* País de residencia */}
+              <Text style={fieldLabel}>País de residencia</Text>
+              <TextInput
+                value={g.country_of_residence}
+                onChangeText={v => updateGuest(activePlaza, gi, 'country_of_residence', v)}
+                placeholder="España"
+                autoCapitalize="words"
+                style={input}
+              />
+
+              {/* Localidad */}
+              <Text style={fieldLabel}>Localidad</Text>
+              <TextInput
+                value={g.city_of_residence}
+                onChangeText={v => updateGuest(activePlaza, gi, 'city_of_residence', v)}
+                placeholder="Ciudad o municipio"
+                autoCapitalize="words"
+                style={input}
+              />
+
+              {/* Teléfono */}
+              <Text style={fieldLabel}>Teléfono</Text>
+              <TextInput
+                value={g.phone}
+                onChangeText={v => updateGuest(activePlaza, gi, 'phone', v)}
+                placeholder="+34 600 000 000"
+                keyboardType="phone-pad"
+                style={input}
+              />
+
+              {/* Email */}
+              <Text style={fieldLabel}>Email</Text>
+              <TextInput
+                value={g.email}
+                onChangeText={v => updateGuest(activePlaza, gi, 'email', v)}
+                placeholder="correo@ejemplo.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
                 autoCorrect={false}
                 style={input}
               />

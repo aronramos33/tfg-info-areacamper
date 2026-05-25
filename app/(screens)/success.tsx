@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
   Text,
@@ -30,12 +31,14 @@ function formatEuro(cents: number) {
 }
 
 // Converts DD/MM/YYYY or YYYY-MM-DD to YYYY-MM-DD for Supabase date column
-function normalizeBirthDate(raw: string): string {
-  if (!raw) return '';
+function normalizeBirthDate(raw: string): string | null {
+  if (!raw) return null;
   const ddmmyyyy = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
   const m = raw.match(ddmmyyyy);
   if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-  return raw; // assume already YYYY-MM-DD
+  // Si ya está en formato YYYY-MM-DD lo devolvemos tal cual
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  return null; // formato inválido → null
 }
 function formatDate(d: string | null) {
   if (!d) return '—';
@@ -49,9 +52,21 @@ export default function SuccessPage() {
   const { pending, resetPending } = usePendingReservation();
   const travelersSaved = useRef(false);
 
-  // Use URL param first; fall back to context (Expo Go deep-link params can be lost
-  // when WebBrowser is open — the context value is stored before opening Stripe).
-  const session_id = params.session_id || pending.checkoutSessionId || undefined;
+  // Tercer fallback: AsyncStorage, sobrevive recargas de bundle (OTA updates en Expo Go)
+  const [asyncSessionId, setAsyncSessionId] = useState<string | undefined>(
+    undefined,
+  );
+  useEffect(() => {
+    AsyncStorage.getItem('pending_checkout_session_id').then((id) => {
+      if (id) setAsyncSessionId(id);
+    });
+  }, []);
+
+  const session_id =
+    params.session_id ||
+    pending.checkoutSessionId ||
+    asyncSessionId ||
+    undefined;
 
   const [reservation, setReservation] = useState<ReservationRow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -78,8 +93,13 @@ export default function SuccessPage() {
 
   // Polling hasta que el webhook cree la reserva
   useEffect(() => {
-    if (!sessionReady || !session_id) {
+    // Si no hay session_id en ninguna fuente → no hay pago pendiente, detener carga
+    if (!session_id) {
       setLoading(false);
+      return;
+    }
+    // Si hay session_id pero la sesión aún no está lista → esperar (mantener spinner)
+    if (!sessionReady) {
       return;
     }
 
@@ -122,8 +142,16 @@ export default function SuccessPage() {
           .eq('checkout_session_id', session_id)
           .maybeSingle();
 
-        if (pollErr) console.warn('[success] poll error:', JSON.stringify(pollErr));
-        if (!data) console.log('[success] tick', ticks, 'session_id:', session_id, 'no data yet');
+        if (pollErr)
+          console.warn('[success] poll error:', JSON.stringify(pollErr));
+        if (!data)
+          console.log(
+            '[success] tick',
+            ticks,
+            'session_id:',
+            session_id,
+            'no data yet',
+          );
 
         if (!isMounted) return;
 
@@ -132,40 +160,60 @@ export default function SuccessPage() {
           setReservation(reservationRow);
           setLoading(false);
           clearInterval(timer);
-          // Save travelers from cfg.guests (one row per acompañante per plaza)
-          if (!isModify && !travelersSaved.current && pending.placeConfigs.length > 0) {
+          // Save travelers + extras (client-side; extras avoid Stripe metadata size limits)
+          if (!isModify && !travelersSaved.current) {
             travelersSaved.current = true;
-            try {
-              const rows = pending.placeConfigs.flatMap((cfg, placeIndex) =>
-                (cfg.guests ?? [])
-                  .filter(g => g.full_name?.trim())  // skip guests with no name
-                  .map((g, guestIndex) => ({
-                    reservation_id: reservationRow.id,
-                    full_name: g.full_name || null,
-                    doc_type: g.doc_type || null,
-                    doc_number: g.doc_number || null,
-                    nationality: g.nationality || null,
-                    birth_date: g.birth_date ? normalizeBirthDate(g.birth_date) : null,
-                    gender: null,
-                    place_index: placeIndex,
-                    is_main_traveler: placeIndex === 0 && guestIndex === 0,
-                    vehicle_id: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.id : null,
-                    vehicle_brand: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.brand : null,
-                    vehicle_model: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.model : null,
-                    vehicle_plate: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.plate : null,
-                    vehicle_alias: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.alias : null,
-                    vehicle_length_m: cfg.vehicleSelection?.type === 'saved' ? cfg.vehicleSelection.vehicle.length_m : null,
-                  }))
-              );
-              if (rows.length > 0) {
-                supabase.from('travelers').insert(rows).then(() => resetPending());
-              } else {
+            (async () => {
+              try {
+                // Travelers
+                if (pending.placeConfigs.length > 0) {
+                  const rows = pending.placeConfigs.flatMap((cfg, placeIndex) =>
+                    (cfg.guests ?? [])
+                      .filter((g) => g.full_name?.trim())
+                      .map((g, guestIndex) => ({
+                        reservation_id: reservationRow.id,
+                        full_name: g.full_name || null,
+                        doc_type: g.doc_type || null,
+                        doc_number: g.doc_number || null,
+                        doc_support_number: g.doc_support_number || null,
+                        nationality: g.nationality || null,
+                        birth_date: g.birth_date
+                          ? normalizeBirthDate(g.birth_date)
+                          : null,
+                        gender: g.gender || null,
+                        country_of_residence: g.country_of_residence || null,
+                        city_of_residence: g.city_of_residence || null,
+                        phone: g.phone || null,
+                        email: g.email || null,
+                        place_index: placeIndex,
+                        is_main_traveler: placeIndex === 0 && guestIndex === 0,
+                      })),
+                  );
+                  if (rows.length > 0)
+                    await supabase.from('travelers').insert(rows);
+                }
+                // Extras (calculados en reservation-summary y guardados en context)
+                const pendingExtras = pending.pendingExtras ?? [];
+                if (pendingExtras.length > 0) {
+                  await supabase.from('reservation_extras').insert(
+                    pendingExtras.map((e: any) => ({
+                      reservation_id: reservationRow.id,
+                      extra_id: e.extra_id,
+                      quantity: e.quantity,
+                      pricing_type: e.pricing_type ?? 'per_night',
+                      unit_amount_cents: e.unit_amount_cents,
+                      line_total_cents: e.line_total_cents,
+                      place_index: e.place_index ?? null,
+                    })),
+                  );
+                }
+              } catch (e) {
+                console.warn('post-payment insert error:', e);
+              } finally {
+                AsyncStorage.removeItem('pending_checkout_session_id');
                 resetPending();
               }
-            } catch (e) {
-              console.warn('travelers insert error:', e);
-              resetPending();
-            }
+            })();
           }
           return;
         }
@@ -235,11 +283,15 @@ export default function SuccessPage() {
             <View style={styles.card}>
               <View style={styles.row}>
                 <Text style={styles.label}>Entrada</Text>
-                <Text style={styles.value}>{formatDate(reservation.start_date)}</Text>
+                <Text style={styles.value}>
+                  {formatDate(reservation.start_date)}
+                </Text>
               </View>
               <View style={styles.row}>
                 <Text style={styles.label}>Salida</Text>
-                <Text style={styles.value}>{formatDate(reservation.end_date)}</Text>
+                <Text style={styles.value}>
+                  {formatDate(reservation.end_date)}
+                </Text>
               </View>
               <View style={styles.row}>
                 <Text style={styles.label}>Total</Text>
@@ -253,14 +305,20 @@ export default function SuccessPage() {
               {reservation.full_name && (
                 <View style={styles.row}>
                   <Text style={styles.label}>Titular</Text>
-                  <Text style={styles.value} numberOfLines={1}>{reservation.full_name}</Text>
+                  <Text style={styles.value} numberOfLines={1}>
+                    {reservation.full_name}
+                  </Text>
                 </View>
               )}
               {(reservation.vehicle_brand || reservation.vehicle_plate) && (
                 <View style={styles.row}>
                   <Text style={styles.label}>Vehículo</Text>
                   <Text style={styles.value} numberOfLines={1}>
-                    {[reservation.vehicle_alias ?? `${reservation.vehicle_brand ?? ''} ${reservation.vehicle_model ?? ''}`.trim(), reservation.vehicle_plate]
+                    {[
+                      reservation.vehicle_alias ??
+                        `${reservation.vehicle_brand ?? ''} ${reservation.vehicle_model ?? ''}`.trim(),
+                      reservation.vehicle_plate,
+                    ]
                       .filter(Boolean)
                       .join(' · ')}
                   </Text>
@@ -323,7 +381,13 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   label: { fontSize: 13, color: '#888', flexShrink: 0 },
-  value: { fontSize: 14, fontWeight: '600', color: '#111', flexShrink: 1, textAlign: 'right' },
+  value: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111',
+    flexShrink: 1,
+    textAlign: 'right',
+  },
   valueHighlight: { color: '#007AFF', fontSize: 15 },
   divider: { height: 1, backgroundColor: '#f0f0f0' },
   primaryButton: {

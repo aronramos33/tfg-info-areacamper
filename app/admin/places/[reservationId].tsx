@@ -15,17 +15,30 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import dayjs from 'dayjs';
 import { supabase } from '../../../lib/supabase';
 
+type VehicleSnapshot = {
+  place_index: number;
+  vehicle_id: number | null;
+  brand: string;
+  model: string;
+  plate: string;
+  alias?: string | null;
+  length_m?: number | null;
+};
+
 type ReservationDetail = {
   id: number;
   full_name: string | null;
   dni: string | null;
   phone: string | null;
+  // Legacy single-vehicle fields (backward compat)
   vehicle_id: number | null;
   vehicle_brand: string | null;
   vehicle_model: string | null;
   vehicle_plate: string | null;
   vehicle_alias: string | null;
   vehicle_length_m: number | null;
+  // Multi-vehicle snapshot (new reservations)
+  vehicles_snapshot: VehicleSnapshot[];
   start_date: string;
   end_date: string;
   place_ids: number[] | null;
@@ -59,9 +72,6 @@ type TravelerRow = {
   city_of_residence: string | null;
   phone: string | null;
   email: string | null;
-  vehicle_plate: string | null;
-  vehicle_brand: string | null;
-  vehicle_model: string | null;
 };
 
 function formatEuro(cents: number | null) {
@@ -118,7 +128,7 @@ export default function ReservationDetailScreen() {
         const { data: r, error } = await supabase
           .from('reservations')
           .select(
-            'id,full_name,dni,phone,vehicle_id,vehicle_brand,vehicle_model,vehicle_plate,vehicle_alias,vehicle_length_m,start_date,end_date,place_ids,num_places,nightly_amount_cents,total_amount_cents,payment_status,access_code,created_at',
+            'id,full_name,dni,phone,vehicle_id,vehicle_brand,vehicle_model,vehicle_plate,vehicle_alias,vehicle_length_m,vehicles_snapshot,start_date,end_date,place_ids,num_places,nightly_amount_cents,total_amount_cents,payment_status,access_code,created_at',
           )
           .eq('id', Number(reservationId))
           .single();
@@ -139,7 +149,7 @@ export default function ReservationDetailScreen() {
             .eq('reservation_id', Number(reservationId)),
           supabase
             .from('travelers')
-            .select('id, place_index, full_name, doc_type, doc_number, doc_support_number, nationality, birth_date, gender, country_of_residence, city_of_residence, phone, email, vehicle_plate, vehicle_brand, vehicle_model')
+            .select('id, place_index, full_name, doc_type, doc_number, doc_support_number, nationality, birth_date, gender, country_of_residence, city_of_residence, phone, email')
             .eq('reservation_id', Number(reservationId))
             .order('place_index', { ascending: true }),
         ]);
@@ -219,31 +229,50 @@ export default function ReservationDetailScreen() {
           <Row label="Teléfono" value={reservation.phone ?? '—'} />
         </View>
 
-        {/* Vehículo */}
+        {/* Vehículos */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>🚐 Vehículo</Text>
-          {reservation.vehicle_alias && (
-            <Row label="Alias" value={reservation.vehicle_alias} />
-          )}
-          <Row
-            label="Marca y modelo"
-            value={
-              [reservation.vehicle_brand, reservation.vehicle_model]
-                .filter(Boolean)
-                .join(' ') || '—'
-            }
-          />
-          <Row label="Matrícula" value={reservation.vehicle_plate ?? '—'} />
-          {reservation.vehicle_length_m != null && (
-            <Row
-              label="Longitud"
-              value={`${reservation.vehicle_length_m} m`}
-            />
-          )}
-          {reservation.vehicle_id == null && (
-            <Text style={{ color: '#888', fontSize: 12, marginTop: 6 }}>
-              ⚠️ El vehículo original ya no existe en el perfil del usuario.
-            </Text>
+          <Text style={styles.cardTitle}>🚐 Vehículo{(reservation.vehicles_snapshot?.length ?? 0) > 1 ? 's' : ''}</Text>
+          {(reservation.vehicles_snapshot?.length ?? 0) > 0 ? (
+            reservation.vehicles_snapshot.map((v, i) => (
+              <View key={i} style={{ marginBottom: i < reservation.vehicles_snapshot.length - 1 ? 10 : 0 }}>
+                {reservation.vehicles_snapshot.length > 1 && (
+                  <Text style={{ fontSize: 12, fontWeight: '800', color: '#444', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    Plaza {v.place_index + 1}
+                  </Text>
+                )}
+                {v.alias ? <Row label="Alias" value={v.alias} /> : null}
+                <Row
+                  label="Marca y modelo"
+                  value={[v.brand, v.model].filter(Boolean).join(' ') || '—'}
+                />
+                <Row label="Matrícula" value={v.plate || '—'} />
+                {v.length_m != null && <Row label="Longitud" value={`${v.length_m} m`} />}
+              </View>
+            ))
+          ) : (
+            // Fallback para reservas antiguas sin vehicles_snapshot
+            <>
+              {reservation.vehicle_alias && (
+                <Row label="Alias" value={reservation.vehicle_alias} />
+              )}
+              <Row
+                label="Marca y modelo"
+                value={
+                  [reservation.vehicle_brand, reservation.vehicle_model]
+                    .filter(Boolean)
+                    .join(' ') || '—'
+                }
+              />
+              <Row label="Matrícula" value={reservation.vehicle_plate ?? '—'} />
+              {reservation.vehicle_length_m != null && (
+                <Row label="Longitud" value={`${reservation.vehicle_length_m} m`} />
+              )}
+              {reservation.vehicle_id == null && (
+                <Text style={{ color: '#888', fontSize: 12, marginTop: 6 }}>
+                  ⚠️ El vehículo original ya no existe en el perfil del usuario.
+                </Text>
+              )}
+            </>
           )}
         </View>
 
@@ -294,12 +323,6 @@ export default function ReservationDetailScreen() {
                 {t.city_of_residence ? <Row label="Localidad" value={t.city_of_residence} /> : null}
                 {t.phone ? <Row label="Teléfono" value={t.phone} /> : null}
                 {t.email ? <Row label="Email" value={t.email} /> : null}
-                {t.vehicle_plate ? (
-                  <Row
-                    label="Vehículo"
-                    value={[t.vehicle_brand, t.vehicle_model, t.vehicle_plate].filter(Boolean).join(' · ')}
-                  />
-                ) : null}
               </View>
             ))
           )}

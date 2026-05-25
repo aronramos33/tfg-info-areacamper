@@ -5,8 +5,14 @@ export type GuestDraft = {
   full_name: string;
   doc_type: 'dni' | 'nie' | 'passport';
   doc_number: string;
+  doc_support_number: string;
   nationality: string;
   birth_date: string; // DD/MM/AAAA (se normaliza al guardar)
+  gender: 'm' | 'f' | 'other' | '';
+  country_of_residence: string;
+  city_of_residence: string;
+  phone: string;
+  email: string;
 };
 
 export type NewVehicleDraft = {
@@ -44,6 +50,7 @@ export type PendingReservation = {
   holder: HolderDraft;
   nightlyCents: number;
   checkoutSessionId: string; // guardado antes de abrir Stripe para que success.tsx lo use
+  pendingExtras: object[];   // extras calculados antes de abrir Stripe; success.tsx los inserta
 };
 
 export function emptyGuest(): GuestDraft {
@@ -51,8 +58,14 @@ export function emptyGuest(): GuestDraft {
     full_name: '',
     doc_type: 'dni',
     doc_number: '',
+    doc_support_number: '',
     nationality: 'ES',
     birth_date: '',
+    gender: '',
+    country_of_residence: '',
+    city_of_residence: '',
+    phone: '',
+    email: '',
   };
 }
 
@@ -75,6 +88,7 @@ const emptyPending: PendingReservation = {
   holder: { full_name: '', phone: '', dni: '' },
   nightlyCents: 1500,
   checkoutSessionId: '',
+  pendingExtras: [],
 };
 
 interface PendingCtx {

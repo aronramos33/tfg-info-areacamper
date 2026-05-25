@@ -2,6 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Redacción del TFG
+
+Antes de redactar cualquier sección del TFG, leer obligatoriamente:
+
+1. `redaccion/contexto.md` — contexto del proyecto, datos clave y directrices de redacción de la guía ETSINF (sección 7 del documento).
+2. `redaccion/bibliografia.md` — referencias ya recopiladas, organizadas por sección.
+3. El archivo `.md` de la sección anterior si existe, para mantener coherencia de tono y estilo.
+
+Reglas fijas aplicables a toda la memoria:
+- Citas en el texto: formato APA 7 — `(Autor, año)`.
+- URLs de productos/herramientas (Stripe, Supabase, Park4Night...): nota al pie la primera vez que aparecen, NO en la bibliografía.
+- Fuentes académicas e informes oficiales: en la lista de bibliografía APA 7.
+- El índice está validado por el tutor — no modificarlo.
+- Redacción en español formal; la motivación personal puede ir en primera persona.
+
 ## Commands
 
 ```bash
