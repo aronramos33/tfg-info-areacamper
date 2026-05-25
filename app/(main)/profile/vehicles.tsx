@@ -19,10 +19,8 @@ import RequireAuthCard from '@/components/RequireAuthCard';
 import { supabase } from '@/lib/supabase';
 import {
   Vehicle,
-  isValidLengthMeters,
   isValidSpanishPlate,
   normalizePlate,
-  parseLengthMeters,
   vehicleDisplayName,
 } from '@/components/utils/vehicle';
 
@@ -31,7 +29,6 @@ type FormState = {
   model: string;
   plate: string;
   alias: string;
-  length_m: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -39,7 +36,6 @@ const EMPTY_FORM: FormState = {
   model: '',
   plate: '',
   alias: '',
-  length_m: '',
 };
 
 export default function VehiclesScreen() {
@@ -88,7 +84,6 @@ export default function VehiclesScreen() {
       model: v.model,
       plate: v.plate,
       alias: v.alias ?? '',
-      length_m: v.length_m != null ? String(v.length_m) : '',
     });
     setEditingId(v.id);
   };
@@ -104,8 +99,6 @@ export default function VehiclesScreen() {
     if (!form.plate.trim()) return 'La matrícula es obligatoria.';
     if (!isValidSpanishPlate(form.plate))
       return 'Matrícula inválida. Formato esperado: 1234ABC.';
-    if (!isValidLengthMeters(form.length_m))
-      return 'La longitud debe ser un número entre 0 y 20 metros.';
     return null;
   };
 
@@ -123,7 +116,7 @@ export default function VehiclesScreen() {
       model: form.model.trim(),
       plate: normalizePlate(form.plate),
       alias: form.alias.trim() || null,
-      length_m: parseLengthMeters(form.length_m),
+      length_m: null,
     };
     try {
       if (editingId === 'new') {
@@ -248,11 +241,6 @@ export default function VehiclesScreen() {
                           {v.brand} {v.model}
                         </Text>
                         <Text style={styles.plate}>{v.plate}</Text>
-                        {v.length_m != null && (
-                          <Text style={styles.vehicleMeta}>
-                            Longitud: {v.length_m} m
-                          </Text>
-                        )}
                         <View style={styles.rowButtons}>
                           <Pressable
                             onPress={() => startEdit(v)}
@@ -358,15 +346,6 @@ function VehicleForm({
         onChangeText={(t) => setField('alias', t)}
         placeholder="La furgo grande"
         style={styles.input}
-      />
-
-      <Text style={styles.label}>Longitud (m)</Text>
-      <TextInput
-        value={form.length_m}
-        onChangeText={(t) => setField('length_m', t)}
-        placeholder="6.50"
-        style={styles.input}
-        keyboardType="decimal-pad"
       />
 
       <View style={[styles.rowButtons, { marginTop: 12 }]}>

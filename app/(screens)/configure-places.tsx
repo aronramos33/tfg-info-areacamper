@@ -41,10 +41,10 @@ type LocalPlaceState = {
   // Plaza 0 (usuario): vehículo guardado en la BD
   selectedVehicleId: number | null;
   showNewVehicleForm: boolean;
-  newVehicle: { brand: string; model: string; plate: string; alias: string; length_m: string };
+  newVehicle: { brand: string; model: string; plate: string; alias: string };
   savingVehicle: boolean;
   // Plaza 1+ (acompañante): vehículo escrito sin guardar en BD
-  companionVehicle: { brand: string; model: string; plate: string; alias: string; length_m: string };
+  companionVehicle: { brand: string; model: string; plate: string; alias: string };
   companionVehicleConfirmed: boolean;
   numGuests: number;
   numPets: number;
@@ -56,9 +56,9 @@ function emptyLocal(): LocalPlaceState {
   return {
     selectedVehicleId: null,
     showNewVehicleForm: false,
-    newVehicle: { brand: '', model: '', plate: '', alias: '', length_m: '' },
+    newVehicle: { brand: '', model: '', plate: '', alias: '' },
     savingVehicle: false,
-    companionVehicle: { brand: '', model: '', plate: '', alias: '', length_m: '' },
+    companionVehicle: { brand: '', model: '', plate: '', alias: '' },
     companionVehicleConfirmed: false,
     numGuests: 1,
     numPets: 0,
@@ -198,8 +198,6 @@ export default function ConfigurePlacesScreen() {
     if (!nv.brand.trim()) { Alert.alert('Marca obligatoria'); return; }
     if (!nv.model.trim()) { Alert.alert('Modelo obligatorio'); return; }
     if (!isValidSpanishPlate(nv.plate)) { Alert.alert('Matrícula inválida', 'Formato esperado: 1234ABC.'); return; }
-    if (!isValidLengthMeters(nv.length_m)) { Alert.alert('Longitud inválida', '0 – 20 metros.'); return; }
-
     updatePlaza(plazaIdx, 'savingVehicle', true);
     const { data, error } = await supabase.from('vehicles').insert({
       user_id: session.user.id,
@@ -207,7 +205,7 @@ export default function ConfigurePlacesScreen() {
       model: nv.model.trim(),
       plate: normalizePlate(nv.plate),
       alias: nv.alias.trim() || null,
-      length_m: parseLengthMeters(nv.length_m),
+      length_m: null,
     }).select('*').single();
 
     updatePlaza(plazaIdx, 'savingVehicle', false);
@@ -218,7 +216,7 @@ export default function ConfigurePlacesScreen() {
     const inserted = data as Vehicle;
     setVehicles(prev => [...prev, inserted]);
     setPlaceStates(prev => prev.map((s, i) => i === plazaIdx
-      ? { ...s, selectedVehicleId: inserted.id, showNewVehicleForm: false, savingVehicle: false, newVehicle: { brand: '', model: '', plate: '', alias: '', length_m: '' } }
+      ? { ...s, selectedVehicleId: inserted.id, showNewVehicleForm: false, savingVehicle: false, newVehicle: { brand: '', model: '', plate: '', alias: '' } }
       : s));
   };
 
@@ -397,7 +395,6 @@ export default function ConfigurePlacesScreen() {
                 <TextInput value={s.newVehicle.model} onChangeText={v => updateNewVehicleField(activePlaza, 'model', v)} placeholder="Modelo *" style={input} />
                 <TextInput value={s.newVehicle.plate} onChangeText={v => updateNewVehicleField(activePlaza, 'plate', v)} placeholder="Matrícula * (1234ABC)" style={input} autoCapitalize="characters" autoCorrect={false} />
                 <TextInput value={s.newVehicle.alias} onChangeText={v => updateNewVehicleField(activePlaza, 'alias', v)} placeholder="Alias (opcional)" style={input} />
-                <TextInput value={s.newVehicle.length_m} onChangeText={v => updateNewVehicleField(activePlaza, 'length_m', v)} placeholder="Longitud en metros (opcional)" style={input} keyboardType="decimal-pad" />
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   <Pressable onPress={() => updatePlaza(activePlaza, 'showNewVehicleForm', false)} disabled={s.savingVehicle} style={{ flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: '#ddd', alignItems: 'center' }}>
                     <Text style={{ fontWeight: '600' }}>Cancelar</Text>
@@ -466,13 +463,6 @@ export default function ConfigurePlacesScreen() {
               onChangeText={v => updateCompanionVehicle(activePlaza, 'alias', v)}
               placeholder="Alias (opcional)"
               style={input}
-            />
-            <TextInput
-              value={s.companionVehicle.length_m}
-              onChangeText={v => updateCompanionVehicle(activePlaza, 'length_m', v)}
-              placeholder="Longitud en metros (opcional)"
-              style={input}
-              keyboardType="decimal-pad"
             />
             <Pressable
               onPress={() => {

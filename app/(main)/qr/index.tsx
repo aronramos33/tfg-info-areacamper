@@ -27,7 +27,7 @@ type Reservation = {
   end_date: string;
   status: string | null;
   payment_status: string | null;
-  total_amount_cents: number | null;
+  place_ids: number[] | null;
   access_code: string | null;
   access_expires_at: string | null;
   created_at: string;
@@ -35,15 +35,8 @@ type Reservation = {
   cancelled_at: string | null;
 };
 
-function formatEuro(cents?: number | null) {
-  const v = Number(cents ?? 0);
-  return `${(v / 100).toFixed(2)} €`;
-}
-
-function formatRange(start: string, end: string) {
-  const s = dayjs(start).format('DD/MM/YYYY');
-  const e = dayjs(end).format('DD/MM/YYYY');
-  return `${s} → ${e}`;
+function formatDate(d: string) {
+  return dayjs(d).format('DD/MM/YYYY');
 }
 
 export default function QrScreen() {
@@ -66,8 +59,8 @@ export default function QrScreen() {
   const [showCancelled, setShowCancelled] = useState(false);
   const [nfcVisible, setNfcVisible] = useState(false);
 
-  // ✅ NUEVO: token rotativo para el QR
   const [qrPass, setQrPass] = useState<string>('');
+  const [placeNames, setPlaceNames] = useState<string[]>([]);
 
   // “ahora” estable (para evitar warnings/hooks)
   const now = useMemo(() => dayjs(), []);
@@ -95,7 +88,7 @@ export default function QrScreen() {
         const { data, error } = await supabase
           .from('reservations')
           .select(
-            'id,user_id,start_date,end_date,status,payment_status,total_amount_cents,access_code,access_expires_at,created_at,modified_at,cancelled_at',
+            'id,user_id,start_date,end_date,status,payment_status,place_ids,access_code,access_expires_at,created_at,modified_at,cancelled_at',
           )
           .eq('user_id', userId)
           .neq('status', 'pending')
@@ -250,7 +243,18 @@ export default function QrScreen() {
     return { canShow: true, message: '' };
   }, [selected]);
 
-  // ✅ NUEVO: refresco automático del token QR (cada 45s)
+  useEffect(() => {
+    const ids = selected?.place_ids;
+    if (!ids?.length) { setPlaceNames([]); return; }
+    supabase.from('places').select('id, name').in('id', ids).then(({ data }) => {
+      if (!data) return;
+      const map: Record<number, string> = {};
+      for (const p of data) map[p.id as number] = p.name as string;
+      setPlaceNames(ids.map((id) => map[id] ?? `#${id}`));
+    });
+  }, [selected?.id]);
+
+  // refresco automático del token QR (cada 45s)
   useEffect(() => {
     // Limpieza si no hay reserva o no se debe mostrar
     if (!selected?.id || !qrAvailability.canShow) {
@@ -311,11 +315,10 @@ export default function QrScreen() {
       >
         <View style={styles.itemHeader}>
           <Text style={styles.itemTitle}>
-            {formatRange(r.start_date, r.end_date)}
+            {formatDate(r.start_date)} → {formatDate(r.end_date)}
           </Text>
           <Text style={styles.itemChevron}>›</Text>
         </View>
-        <Text style={styles.itemSub}>{formatEuro(r.total_amount_cents)}</Text>
         {(cancelled || wasModified) && (
           <View style={styles.badgeRow}>
             {cancelled && (
@@ -432,51 +435,53 @@ export default function QrScreen() {
             <Text style={styles.subtle}>No hay reservas.</Text>
           ) : (
             <>
-              <Text style={styles.cardTitle}>
-                Periodo: {formatRange(selected.start_date, selected.end_date)}
-              </Text>
-              <Text style={styles.cardSub}>
-                Total: {formatEuro(selected.total_amount_cents)}
-              </Text>
+              <View style={styles.infoRow}>
+                <View style={styles.infoCell}>
+                  <Text style={styles.infoLabel}>Entrada</Text>
+                  <Text style={styles.infoValue}>{formatDate(selected.start_date)}</Text>
+                </View>
+                <View style={styles.infoDivider} />
+                <View style={styles.infoCell}>
+                  <Text style={styles.infoLabel}>Salida</Text>
+                  <Text style={styles.infoValue}>{formatDate(selected.end_date)}</Text>
+                </View>
+              </View>
 
               <View style={{ marginTop: 14, alignItems: 'center' }}>
                 {qrAvailability.canShow && qrValue ? (
                   <>
                     <QRCode value={qrValue} size={220} />
-                    <Text
-                      style={[
-                        styles.subtle,
-                        { marginTop: 10, textAlign: 'center' },
-                      ]}
-                    >
+                    <Text style={[styles.subtle, { marginTop: 10, textAlign: 'center' }]}>
                       Muestra este QR en el acceso.
                     </Text>
-                    <Pressable
-                      onPress={() => setNfcVisible(true)}
-                      style={({ pressed }) => [
-                        styles.nfcBtn,
-                        pressed && { opacity: 0.7 },
-                      ]}
-                    >
-                      <Text style={styles.nfcBtnText}>📡 Acceso por NFC</Text>
-                    </Pressable>
                   </>
                 ) : (
                   <>
                     <View style={styles.qrPlaceholder}>
-                      <Text style={styles.qrPlaceholderText}>
-                        QR no disponible
-                      </Text>
+                      <Text style={styles.qrPlaceholderText}>QR no disponible</Text>
                     </View>
-                    <Text
-                      style={[
-                        styles.subtle,
-                        { marginTop: 10, textAlign: 'center' },
-                      ]}
-                    >
+                    <Text style={[styles.subtle, { marginTop: 10, textAlign: 'center' }]}>
                       {qrAvailability.message}
                     </Text>
                   </>
+                )}
+
+                {placeNames.length > 0 && (
+                  <View style={styles.plazasBadge}>
+                    <Text style={styles.plazasLabel}>
+                      {placeNames.length > 1 ? 'Plazas' : 'Plaza'}
+                    </Text>
+                    <Text style={styles.plazasValue}>{placeNames.join(' · ')}</Text>
+                  </View>
+                )}
+
+                {qrAvailability.canShow && qrValue && (
+                  <Pressable
+                    onPress={() => setNfcVisible(true)}
+                    style={({ pressed }) => [styles.nfcBtn, pressed && { opacity: 0.7 }]}
+                  >
+                    <Text style={styles.nfcBtnText}>📡 Acceso por NFC</Text>
+                  </Pressable>
                 )}
               </View>
             </>
@@ -684,6 +689,30 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.3,
   },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 4,
+  },
+  infoCell: { flex: 1, alignItems: 'center' },
+  infoLabel: { fontSize: 11, fontWeight: '600', color: '#999', textTransform: 'uppercase', letterSpacing: 0.4 },
+  infoValue: { fontSize: 14, fontWeight: '700', color: '#111', marginTop: 2 },
+  infoDivider: { width: 1, backgroundColor: '#eee', alignSelf: 'stretch', marginHorizontal: 4 },
+
+  plazasBadge: {
+    marginTop: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: '#EEF4FF',
+    borderWidth: 1.5,
+    borderColor: '#1A73E8',
+    alignItems: 'center',
+    minWidth: 160,
+  },
+  plazasLabel: { fontSize: 11, fontWeight: '700', color: '#1A73E8', textTransform: 'uppercase', letterSpacing: 0.5 },
+  plazasValue: { fontSize: 18, fontWeight: '800', color: '#1A73E8', marginTop: 2 },
+
   nfcBtn: {
     marginTop: 14,
     paddingVertical: 12,

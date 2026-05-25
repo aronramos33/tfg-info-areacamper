@@ -75,10 +75,9 @@ type SnapshotVehicleDraft = {
   model: string;
   plate: string;
   alias: string;
-  length_m: string;
 };
 
-type NewVehicleForm = { brand: string; model: string; plate: string; alias: string; length_m: string };
+type NewVehicleForm = { brand: string; model: string; plate: string; alias: string };
 
 type PlaceEditState = {
   vehicleId: number | null;
@@ -111,7 +110,7 @@ export default function EditReservationScreen() {
   const [activePlaza, setActivePlaza] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [showNewVehicleForm, setShowNewVehicleForm] = useState(false);
-  const [newVehicleForm, setNewVehicleForm] = useState<NewVehicleForm>({ brand: '', model: '', plate: '', alias: '', length_m: '' });
+  const [newVehicleForm, setNewVehicleForm] = useState<NewVehicleForm>({ brand: '', model: '', plate: '', alias: '' });
   const [savingVehicle, setSavingVehicle] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -190,7 +189,6 @@ export default function EditReservationScreen() {
           model: snap?.model ?? '',
           plate: snap?.plate ?? '',
           alias: snap?.alias ?? '',
-          length_m: snap?.length_m != null ? String(snap.length_m) : '',
         };
 
         return {
@@ -254,7 +252,7 @@ export default function EditReservationScreen() {
     ));
 
   const saveNewVehicle = async () => {
-    const { brand, model, plate, alias, length_m } = newVehicleForm;
+    const { brand, model, plate, alias } = newVehicleForm;
     if (!brand.trim() || !model.trim() || !plate.trim()) {
       Alert.alert('Faltan campos', 'Marca, modelo y matrícula son obligatorios.');
       return;
@@ -266,7 +264,7 @@ export default function EditReservationScreen() {
       model: model.trim(),
       plate: plate.trim().toUpperCase(),
       alias: alias.trim() || null,
-      length_m: length_m ? parseFloat(length_m) : null,
+      length_m: null,
     }).select().single();
     setSavingVehicle(false);
     if (error) { Alert.alert('Error', error.message); return; }
@@ -274,7 +272,7 @@ export default function EditReservationScreen() {
     setVehicles(prev => [...prev, newV]);
     updatePlace(0, 'vehicleId', newV.id);
     setShowNewVehicleForm(false);
-    setNewVehicleForm({ brand: '', model: '', plate: '', alias: '', length_m: '' });
+    setNewVehicleForm({ brand: '', model: '', plate: '', alias: '' });
   };
 
   const updateGuest = (plazaIdx: number, guestIdx: number, key: keyof GuestDraft, val: string) =>
@@ -335,7 +333,7 @@ export default function EditReservationScreen() {
         model: sv.model.trim(),
         plate: sv.plate.trim().toUpperCase(),
         alias: sv.alias.trim() || null,
-        length_m: sv.length_m ? parseFloat(sv.length_m) : null,
+        length_m: null,
       };
     });
 
@@ -591,8 +589,6 @@ export default function EditReservationScreen() {
                   <TextInput value={newVehicleForm.plate} onChangeText={v => setNewVehicleForm(f => ({ ...f, plate: v }))} placeholder="Ej: 1234 ABC" autoCapitalize="characters" autoCorrect={false} style={styles.input} />
                   <Text style={styles.fieldLabel}>Alias (opcional)</Text>
                   <TextInput value={newVehicleForm.alias} onChangeText={v => setNewVehicleForm(f => ({ ...f, alias: v }))} placeholder="Ej: La furgo" style={styles.input} />
-                  <Text style={styles.fieldLabel}>Longitud en metros (opcional)</Text>
-                  <TextInput value={newVehicleForm.length_m} onChangeText={v => setNewVehicleForm(f => ({ ...f, length_m: v }))} placeholder="Ej: 5.40" keyboardType="decimal-pad" style={styles.input} />
                   <Pressable
                     onPress={saveNewVehicle}
                     disabled={savingVehicle}
@@ -614,8 +610,6 @@ export default function EditReservationScreen() {
               <TextInput value={s.snapshotVehicle.plate} onChangeText={v => updateSnapshotVehicle(activePlaza, 'plate', v)} placeholder="Ej: 5678 XYZ" autoCapitalize="characters" autoCorrect={false} style={styles.input} />
               <Text style={styles.fieldLabel}>Alias (opcional)</Text>
               <TextInput value={s.snapshotVehicle.alias} onChangeText={v => updateSnapshotVehicle(activePlaza, 'alias', v)} placeholder="Ej: Moto de los García" style={styles.input} />
-              <Text style={styles.fieldLabel}>Longitud en metros (opcional)</Text>
-              <TextInput value={s.snapshotVehicle.length_m} onChangeText={v => updateSnapshotVehicle(activePlaza, 'length_m', v)} placeholder="Ej: 6.20" keyboardType="decimal-pad" style={styles.input} />
             </>
           )}
         </View>

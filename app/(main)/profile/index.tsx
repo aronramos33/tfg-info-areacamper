@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
-  Linking,
+  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -17,10 +18,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import RequireAuthCard from '@/components/RequireAuthCard';
 import { supabase } from '@/lib/supabase';
 import { formatCents } from '@/components/utils/money';
-
-const LOCALE_LABELS: Record<string, string> = { es: 'Español', en: 'English' };
-const LOCALE_OPTIONS = Object.entries(LOCALE_LABELS) as [string, string][];
-const PRIVACY_URL = 'https://example.com/privacy';
+import { pickAndUploadAvatar, deleteAvatar } from '@/lib/uploadAvatar';
 
 async function fetchVehicleCount(userId: string): Promise<number> {
   const { count, error } = await supabase
@@ -31,13 +29,16 @@ async function fetchVehicleCount(userId: string): Promise<number> {
   return count ?? 0;
 }
 
-async function fetchProfileMeta(userId: string): Promise<{ locale: string }> {
+async function fetchProfileData(userId: string): Promise<{ complete: boolean; avatarUrl: string | null }> {
   const { data } = await supabase
     .from('user_profiles')
-    .select('preferred_locale')
+    .select('first_name, last_name, phone, dni, avatar_url')
     .eq('user_id', userId)
     .maybeSingle();
-  return { locale: data?.preferred_locale ?? 'es' };
+  return {
+    complete: Boolean(data?.first_name && data?.last_name && data?.phone && data?.dni),
+    avatarUrl: (data?.avatar_url as string | null) ?? null,
+  };
 }
 
 async function fetchNightlyPrice(): Promise<number | null> {
@@ -63,6 +64,7 @@ type SettingsRowProps = {
   icon: string;
   label: string;
   value?: string;
+  valueWarning?: boolean;
   onPress?: () => void;
   showChevron?: boolean;
   destructive?: boolean;
@@ -72,6 +74,7 @@ function SettingsRow({
   icon,
   label,
   value,
+  valueWarning = false,
   onPress,
   showChevron = true,
   destructive = false,
@@ -92,7 +95,11 @@ function SettingsRow({
         </Text>
       </View>
       <View style={styles.rowRight}>
-        {value ? <Text style={styles.rowValue}>{value}</Text> : null}
+        {value ? (
+          <Text style={[styles.rowValue, valueWarning && styles.rowValueWarning]}>
+            {value}
+          </Text>
+        ) : null}
         {showChevron && onPress ? (
           <Text style={styles.rowChevron}>›</Text>
         ) : null}
@@ -127,9 +134,10 @@ export default function ProfileIndex() {
   const segments = useSegments();
 
   const [vehicleCount, setVehicleCount] = useState<number | null>(null);
-  const [locale, setLocale] = useState('es');
+  const [profileComplete, setProfileComplete] = useState<boolean | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [loadingMeta, setLoadingMeta] = useState(true);
-  const [showLocaleOptions, setShowLocaleOptions] = useState(false);
   const [nightlyCents, setNightlyCents] = useState<number | null>(null);
   const [extrasCount, setExtrasCount] = useState<number | null>(null);
 
@@ -164,18 +172,19 @@ export default function ProfileIndex() {
     void (async () => {
       setLoadingMeta(true);
       try {
-        const [base, admin] = await Promise.all([
-          Promise.all([fetchProfileMeta(user.id), fetchVehicleCount(user.id)]),
+        const [count, profileData, adminData] = await Promise.all([
+          fetchVehicleCount(user.id),
+          fetchProfileData(user.id),
           isAdmin
             ? Promise.all([fetchNightlyPrice(), fetchExtrasCount()])
             : Promise.resolve([null, null] as [null, null]),
         ]);
-        const [meta, count] = base;
-        setLocale(meta.locale);
         setVehicleCount(count);
+        setProfileComplete(profileData.complete);
+        setAvatarUrl(profileData.avatarUrl);
         if (isAdmin) {
-          setNightlyCents(admin[0]);
-          setExtrasCount(admin[1] as number);
+          setNightlyCents(adminData[0]);
+          setExtrasCount(adminData[1] as number);
         }
       } finally {
         setLoadingMeta(false);
@@ -188,6 +197,10 @@ export default function ProfileIndex() {
       if (!user?.id) return;
       const refreshes: Promise<unknown>[] = [
         fetchVehicleCount(user.id).then(setVehicleCount),
+        fetchProfileData(user.id).then((d) => {
+          setProfileComplete(d.complete);
+          setAvatarUrl(d.avatarUrl);
+        }),
       ];
       if (isAdmin) {
         refreshes.push(fetchNightlyPrice().then((v) => v != null && setNightlyCents(v)));
@@ -197,16 +210,43 @@ export default function ProfileIndex() {
     }, [user?.id, isAdmin]),
   );
 
-  const handleLocaleSelect = async (newLocale: string) => {
-    setShowLocaleOptions(false);
-    if (!user?.id || newLocale === locale) return;
-    setLocale(newLocale);
-    await supabase
-      .from('user_profiles')
-      .upsert(
-        { user_id: user.id, preferred_locale: newLocale },
-        { onConflict: 'user_id' },
-      );
+  const doPickAvatar = async () => {
+    if (!user?.id) return;
+    setUploadingAvatar(true);
+    try {
+      const url = await pickAndUploadAvatar(user.id);
+      if (url) setAvatarUrl(url);
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'No se pudo subir la foto.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const doDeleteAvatar = async () => {
+    if (!user?.id) return;
+    setUploadingAvatar(true);
+    try {
+      await deleteAvatar(user.id);
+      setAvatarUrl(null);
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'No se pudo eliminar la foto.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const handleChangeAvatar = () => {
+    if (!user?.id) return;
+    if (avatarUrl) {
+      Alert.alert('Foto de perfil', '¿Qué quieres hacer?', [
+        { text: 'Cambiar foto', onPress: doPickAvatar },
+        { text: 'Eliminar foto', style: 'destructive', onPress: doDeleteAvatar },
+        { text: 'Cancelar', style: 'cancel' },
+      ]);
+    } else {
+      void doPickAvatar();
+    }
   };
 
   const handleSignOut = () => {
@@ -231,9 +271,21 @@ export default function ProfileIndex() {
 
         {/* ── Cabecera de perfil ── */}
         <View style={styles.profileHeader}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials}</Text>
-          </View>
+          <Pressable onPress={handleChangeAvatar} disabled={uploadingAvatar} style={styles.avatarWrapper}>
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+            ) : (
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>{initials}</Text>
+              </View>
+            )}
+            <View style={styles.avatarBadge}>
+              {uploadingAvatar
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={styles.avatarBadgeIcon}>📷</Text>
+              }
+            </View>
+          </Pressable>
           <View style={styles.profileInfo}>
             <Text style={styles.profileName}>{displayName}</Text>
             <Text style={styles.profileEmail}>{user?.email ?? '—'}</Text>
@@ -247,6 +299,14 @@ export default function ProfileIndex() {
           <SettingsRow
             icon="👤"
             label="Datos personales"
+            value={
+              loadingMeta || profileComplete === null
+                ? '…'
+                : profileComplete
+                  ? undefined
+                  : 'Incompleto'
+            }
+            valueWarning={!loadingMeta && profileComplete === false}
             onPress={() => router.push(`${profileBase}/edit` as any)}
           />
           {!isAdmin && (
@@ -314,46 +374,15 @@ export default function ProfileIndex() {
         <SectionLabel label="APLICACIÓN" />
         <SectionGroup>
           <SettingsRow
-            icon="🌐"
-            label="Idioma"
-            value={
-              loadingMeta
-                ? '…'
-                : `${LOCALE_LABELS[locale] ?? locale}  ${showLocaleOptions ? '▲' : '▼'}`
-            }
-            onPress={() => setShowLocaleOptions((v) => !v)}
-            showChevron={false}
-          />
-          {showLocaleOptions &&
-            LOCALE_OPTIONS.map(([code, name], i) => (
-              <React.Fragment key={code}>
-                <RowDivider />
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.localeRow,
-                    pressed && { backgroundColor: '#f0f0f0' },
-                  ]}
-                  onPress={() => handleLocaleSelect(code)}
-                >
-                  <Text
-                    style={[
-                      styles.localeRowText,
-                      locale === code && styles.localeRowSelected,
-                    ]}
-                  >
-                    {name}
-                  </Text>
-                  {locale === code && (
-                    <Text style={styles.localeCheck}>✓</Text>
-                  )}
-                </Pressable>
-              </React.Fragment>
-            ))}
-          <RowDivider />
-          <SettingsRow
             icon="📄"
             label="Política y privacidad"
-            onPress={() => Linking.openURL(PRIVACY_URL)}
+            onPress={() => router.push(`${profileBase}/privacy` as any)}
+          />
+          <RowDivider />
+          <SettingsRow
+            icon="💬"
+            label="¿Necesitas ayuda?"
+            onPress={() => router.push(`${profileBase}/contact` as any)}
           />
         </SectionGroup>
 
@@ -390,6 +419,10 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
     gap: 16,
   },
+  avatarWrapper: {
+    width: 64,
+    height: 64,
+  },
   avatar: {
     width: 64,
     height: 64,
@@ -398,6 +431,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  avatarImage: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+  },
+  avatarBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  avatarBadgeIcon: { fontSize: 10 },
   avatarText: { color: '#fff', fontSize: 24, fontWeight: '700' },
   profileInfo: { flex: 1, gap: 2 },
   profileName: { fontSize: 20, fontWeight: '700', color: '#111' },
@@ -431,9 +483,10 @@ const styles = StyleSheet.create({
   rowLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
   rowIcon: { fontSize: 18, width: 26, textAlign: 'center' },
   rowLabel: { fontSize: 16, color: '#111' },
-  destructiveLabel: { color: '#ff3b30' },
+  destructiveLabel: { color: '#1a3a6e' },
   rowRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   rowValue: { fontSize: 15, color: '#8e8e93' },
+  rowValueWarning: { color: '#FF9500', fontWeight: '600' },
   rowChevron: {
     fontSize: 18,
     color: '#c7c7cc',
@@ -445,18 +498,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#e0e0e0',
     marginLeft: 54,
   },
-
-  localeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    paddingLeft: 54,
-  },
-  localeRowText: { fontSize: 16, color: '#111' },
-  localeRowSelected: { color: '#007AFF', fontWeight: '600' },
-  localeCheck: { fontSize: 16, color: '#007AFF', fontWeight: '700' },
 
   version: {
     textAlign: 'center',

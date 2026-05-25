@@ -28,10 +28,24 @@ import {
 } from '@/components/utils/vehicle';
 import ParkingMapPicker from '@/components/ParkingMapPicker';
 
+const GENDER_LABEL: Record<string, string> = {
+  male: 'Hombre', female: 'Mujer', other: 'Otro', undisclosed: 'Prefiero no indicarlo',
+};
+
+function isoToDisplayDate(s: string | null | undefined): string | null {
+  if (!s) return null;
+  const [y, m, d] = s.split('-');
+  return `${d}/${m}/${y}`;
+}
+
 type UserProfile = {
+  first_name: string;
+  last_name: string;
   full_name: string;
   phone: string;
   dni: string;
+  birth_date: string | null;
+  gender: string | null;
 };
 
 type Extra = {
@@ -58,11 +72,12 @@ export default function CheckoutScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
 
   const [form, setForm] = useState({
-    full_name: '',
+    first_name: '',
+    last_name: '',
     dni: '',
     phone: '',
   });
-  const setField = (key: keyof typeof form, value: string) =>
+  const setField = (key: 'first_name' | 'last_name' | 'dni' | 'phone', value: string) =>
     setForm((p) => ({ ...p, [key]: value }));
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -75,7 +90,6 @@ export default function CheckoutScreen() {
     model: '',
     plate: '',
     alias: '',
-    length_m: '',
   });
   const [savingVehicle, setSavingVehicle] = useState(false);
   const setNewVehicleField = (
@@ -158,7 +172,7 @@ export default function CheckoutScreen() {
             .single(),
           supabase
             .from('user_profiles')
-            .select('full_name, phone, dni')
+            .select('first_name, last_name, full_name, phone, dni, birth_date, gender')
             .eq('user_id', session.user.id)
             .single(),
           supabase
@@ -189,18 +203,31 @@ export default function CheckoutScreen() {
           setNightlyCents(pricingRes.data.nightly_amount_cents);
 
         const profileData = profileRes.data;
-        let fullName = profileData?.full_name ?? '';
-        if (!fullName) {
-          const meta = session.user.user_metadata;
-          const first = (meta?.first_name ?? meta?.given_name ?? '') as string;
-          const last = (meta?.last_name ?? meta?.family_name ?? '') as string;
-          fullName = [first, last].filter(Boolean).join(' ');
-        }
+        const meta = session.user.user_metadata;
+        const firstName =
+          profileData?.first_name ||
+          (meta?.first_name ?? meta?.given_name ?? '') as string;
+        const lastName =
+          profileData?.last_name ||
+          (meta?.last_name ?? meta?.family_name ?? '') as string;
+        const fullName =
+          profileData?.full_name ||
+          [firstName, lastName].filter(Boolean).join(' ');
         setProfile(
-          profileData ? { ...profileData, full_name: fullName } : null,
+          profileData
+            ? {
+                ...profileData,
+                first_name: firstName,
+                last_name: lastName,
+                full_name: fullName,
+                birth_date: (profileData.birth_date as string | null) ?? null,
+                gender: (profileData.gender as string | null) ?? null,
+              }
+            : null,
         );
         setForm({
-          full_name: fullName ?? '',
+          first_name: firstName,
+          last_name: lastName,
           dni: profileData?.dni ?? '',
           phone: profileData?.phone ?? '',
         });
@@ -268,13 +295,13 @@ export default function CheckoutScreen() {
       return;
     }
 
-    const fullNameToUse = profile.full_name
-      ? profile.full_name
-      : form.full_name.trim();
-    const dniToUse = profile.dni ? profile.dni : form.dni.trim();
+    const firstToUse = (profile?.first_name || form.first_name).trim();
+    const lastToUse = (profile?.last_name || form.last_name).trim();
+    const fullNameToUse = [firstToUse, lastToUse].filter(Boolean).join(' ');
+    const dniToUse = (profile?.dni || form.dni).trim();
     const phoneToUse = form.phone.trim();
 
-    if (!fullNameToUse || !dniToUse || !phoneToUse) {
+    if (!firstToUse || !dniToUse || !phoneToUse) {
       Alert.alert(
         'Perfil incompleto',
         'Completa tu nombre, DNI y teléfono antes de reservar.',
@@ -296,9 +323,11 @@ export default function CheckoutScreen() {
       const { error: upErr } = await supabase.from('user_profiles').upsert(
         {
           user_id: session.user.id,
-          full_name: fullNameToUse,
-          dni: dniToUse,
-          phone: phoneToUse,
+          first_name: firstToUse || null,
+          last_name: lastToUse || null,
+          full_name: fullNameToUse || null,
+          dni: dniToUse || null,
+          phone: phoneToUse || null,
         },
         { onConflict: 'user_id' },
       );
@@ -430,40 +459,47 @@ export default function CheckoutScreen() {
         <View style={card}>
           <Text style={sectionTitle}>Tus datos</Text>
 
-          <Text style={{ marginTop: 6, color: '#666' }}>Nombre</Text>
-          {profile.full_name ? (
-            <Text>{profile.full_name || '—'}</Text>
+          {/* Email — siempre de sesión, solo lectura */}
+          <Text style={{ marginTop: 6, color: '#666' }}>Correo electrónico</Text>
+          <Text style={{ paddingVertical: 8 }}>{session.user.email ?? '—'}</Text>
+
+          <Text style={{ marginTop: 12, color: '#666' }}>Nombre</Text>
+          {profile?.first_name ? (
+            <Text style={{ paddingVertical: 8 }}>{profile.first_name}</Text>
           ) : (
-            <TextInput
-              value={form.full_name}
-              onChangeText={(t) => setField('full_name', t)}
-              placeholder="Nombre y apellidos"
-              autoCapitalize="words"
-              style={input}
-            />
+            <TextInput value={form.first_name} onChangeText={(t) => setField('first_name', t)} placeholder="Nombre" autoCapitalize="words" style={input} />
           )}
 
-          <Text style={{ marginTop: 12, color: '#666' }}>DNI</Text>
-          {profile.dni ? (
-            <Text>{profile.dni || '—'}</Text>
+          <Text style={{ marginTop: 12, color: '#666' }}>Apellidos</Text>
+          {profile?.last_name ? (
+            <Text style={{ paddingVertical: 8 }}>{profile.last_name}</Text>
           ) : (
-            <TextInput
-              value={form.dni}
-              onChangeText={(t) => setField('dni', t)}
-              placeholder="DNI"
-              autoCapitalize="characters"
-              style={input}
-            />
+            <TextInput value={form.last_name} onChangeText={(t) => setField('last_name', t)} placeholder="Apellidos" autoCapitalize="words" style={input} />
+          )}
+
+          <Text style={{ marginTop: 12, color: '#666' }}>DNI / NIE</Text>
+          {profile?.dni ? (
+            <Text style={{ paddingVertical: 8 }}>{profile.dni}</Text>
+          ) : (
+            <TextInput value={form.dni} onChangeText={(t) => setField('dni', t)} placeholder="12345678Z" autoCapitalize="characters" style={input} />
           )}
 
           <Text style={{ marginTop: 12, color: '#666' }}>Teléfono</Text>
-          <TextInput
-            value={form.phone}
-            onChangeText={(t) => setField('phone', t)}
-            placeholder="Teléfono"
-            keyboardType="phone-pad"
-            style={input}
-          />
+          <TextInput value={form.phone} onChangeText={(t) => setField('phone', t)} placeholder="+34 600 000 000" keyboardType="phone-pad" style={input} />
+
+          {profile?.birth_date && (
+            <>
+              <Text style={{ marginTop: 12, color: '#666' }}>Fecha de nacimiento</Text>
+              <Text style={{ paddingVertical: 8 }}>{isoToDisplayDate(profile.birth_date)}</Text>
+            </>
+          )}
+
+          {profile?.gender && (
+            <>
+              <Text style={{ marginTop: 12, color: '#666' }}>Género</Text>
+              <Text style={{ paddingVertical: 8 }}>{GENDER_LABEL[profile.gender] ?? profile.gender}</Text>
+            </>
+          )}
         </View>
 
         {/* Vehículo */}
@@ -549,13 +585,6 @@ export default function CheckoutScreen() {
                 placeholder="Alias (opcional)"
                 style={input}
               />
-              <TextInput
-                value={newVehicle.length_m}
-                onChangeText={(t) => setNewVehicleField('length_m', t)}
-                placeholder="Longitud en metros (opcional)"
-                style={input}
-                keyboardType="decimal-pad"
-              />
               <View
                 style={{ flexDirection: 'row', gap: 10, marginTop: 6 }}
               >
@@ -567,7 +596,6 @@ export default function CheckoutScreen() {
                       model: '',
                       plate: '',
                       alias: '',
-                      length_m: '',
                     });
                   }}
                   disabled={savingVehicle}
@@ -601,13 +629,6 @@ export default function CheckoutScreen() {
                       );
                       return;
                     }
-                    if (!isValidLengthMeters(newVehicle.length_m)) {
-                      Alert.alert(
-                        'Longitud inválida',
-                        'Indica un valor entre 0 y 20 metros.',
-                      );
-                      return;
-                    }
                     setSavingVehicle(true);
                     const payload = {
                       user_id: session.user.id,
@@ -615,7 +636,7 @@ export default function CheckoutScreen() {
                       model: newVehicle.model.trim(),
                       plate: normalizePlate(newVehicle.plate),
                       alias: newVehicle.alias.trim() || null,
-                      length_m: parseLengthMeters(newVehicle.length_m),
+                      length_m: null,
                     };
                     const { data, error } = await supabase
                       .from('vehicles')
@@ -643,7 +664,6 @@ export default function CheckoutScreen() {
                       model: '',
                       plate: '',
                       alias: '',
-                      length_m: '',
                     });
                   }}
                   style={{

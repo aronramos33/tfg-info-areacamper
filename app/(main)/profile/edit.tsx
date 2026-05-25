@@ -11,11 +11,14 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/providers/AuthProvider';
 import { supabase } from '@/lib/supabase';
+
+// ── Helpers de texto ─────────────────────────────────────────────────────────
 
 function normalizeSpaces(s: string) {
   return s.replace(/\s+/g, ' ').trim();
@@ -32,6 +35,9 @@ function normalizePhone(s: string) {
   const digits = trimmed.replace(/[^\d]/g, '');
   return hasPlus ? `+${digits}` : digits;
 }
+
+// ── Validaciones ─────────────────────────────────────────────────────────────
+
 const DNI_LETTERS = 'TRWAGMYFPDXBNJZSQVHLCKE';
 function isValidDNI(dniRaw: string): boolean {
   const dni = normalizeDniNie(dniRaw);
@@ -63,32 +69,74 @@ function isValidSpanishPhone(value: string): boolean {
   return /^[6789]/.test(digits);
 }
 
+// ── Género ───────────────────────────────────────────────────────────────────
+
+const GENDER_OPTIONS = [
+  { value: 'male', label: 'Hombre' },
+  { value: 'female', label: 'Mujer' },
+  { value: 'other', label: 'Otro' },
+  { value: 'undisclosed', label: 'Prefiero no indicarlo' },
+] as const;
+type GenderValue = (typeof GENDER_OPTIONS)[number]['value'];
+
+function genderLabel(value: string | null): string {
+  return GENDER_OPTIONS.find((o) => o.value === value)?.label ?? 'Sin completar';
+}
+
+// ── Fecha ─────────────────────────────────────────────────────────────────────
+
+function formatDateDisplay(d: Date): string {
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+function dateToISO(d: Date): string {
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+function isoToDate(s: string | null | undefined): Date | null {
+  if (!s) return null;
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+// ── Carga de perfil ───────────────────────────────────────────────────────────
+
 async function loadProfile(userId: string, metaFullName: string) {
   const { data, error } = await supabase
     .from('user_profiles')
-    .select('first_name, last_name, full_name, phone, dni')
+    .select('first_name, last_name, full_name, phone, dni, birth_date, gender')
     .eq('user_id', userId)
     .maybeSingle();
   if (error) throw error;
   const fallback = data?.full_name ?? metaFullName ?? '';
   return {
-    first_name:
-      data?.first_name ?? (fallback ? fallback.split(' ')[0] : '') ?? '',
-    last_name:
-      data?.last_name ??
-      (fallback ? fallback.split(' ').slice(1).join(' ') : '') ??
-      '',
+    first_name: data?.first_name ?? (fallback ? fallback.split(' ')[0] : '') ?? '',
+    last_name: data?.last_name ?? (fallback ? fallback.split(' ').slice(1).join(' ') : '') ?? '',
     phone: data?.phone ?? '',
     dni: data?.dni ?? '',
+    birth_date: (data?.birth_date as string | null) ?? null,
+    gender: (data?.gender as string | null) ?? null,
   };
 }
+
+// ── Tipos ─────────────────────────────────────────────────────────────────────
 
 type Snapshot = {
   first_name: string;
   last_name: string;
   dni: string;
   phone: string;
+  birth_date: string | null;
+  gender: string | null;
 };
+
+function isProfileComplete(s: Snapshot) {
+  return Boolean(s.first_name && s.last_name && s.dni && s.phone);
+}
+
+// ── Componente ────────────────────────────────────────────────────────────────
 
 export default function ProfileEdit() {
   const { session } = useAuth();
@@ -98,17 +146,19 @@ export default function ProfileEdit() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [dni, setDni] = useState('');
   const [phone, setPhone] = useState('');
+  const [birthDate, setBirthDate] = useState<Date | null>(null);
+  const [gender, setGender] = useState<GenderValue | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const initialRef = useRef<Snapshot | null>(null);
   const isEditingRef = useRef(false);
 
-  useEffect(() => {
-    isEditingRef.current = isEditing;
-  }, [isEditing]);
+  useEffect(() => { isEditingRef.current = isEditing; }, [isEditing]);
 
   useEffect(() => {
     const unsub = navigation.addListener('beforeRemove', (e: any) => {
@@ -116,11 +166,7 @@ export default function ProfileEdit() {
       e.preventDefault();
       Alert.alert('Cambios sin guardar', 'Tienes cambios sin guardar.', [
         { text: 'Seguir editando', style: 'cancel' },
-        {
-          text: 'Descartar',
-          style: 'destructive',
-          onPress: () => navigation.dispatch(e.data.action),
-        },
+        { text: 'Descartar', style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
       ]);
     });
     return unsub;
@@ -131,11 +177,10 @@ export default function ProfileEdit() {
     setLastName(profile.last_name);
     setDni(profile.dni);
     setPhone(profile.phone);
+    setBirthDate(isoToDate(profile.birth_date));
+    setGender((profile.gender as GenderValue | null) ?? null);
     initialRef.current = profile;
-    const hasData = Boolean(
-      profile.first_name || profile.last_name || profile.dni || profile.phone,
-    );
-    setIsEditing(!hasData);
+    setIsEditing(!isProfileComplete(profile));
   };
 
   useEffect(() => {
@@ -143,11 +188,10 @@ export default function ProfileEdit() {
     void (async () => {
       setLoading(true);
       try {
-        const meta =
-          (session.user.user_metadata?.full_name as string | undefined) ?? '';
+        const meta = (session.user.user_metadata?.full_name as string | undefined) ?? '';
         applyLoaded(await loadProfile(session.user.id, meta));
       } catch {
-        applyLoaded({ first_name: '', last_name: '', dni: '', phone: '' });
+        applyLoaded({ first_name: '', last_name: '', dni: '', phone: '', birth_date: null, gender: null });
       } finally {
         setLoading(false);
       }
@@ -161,6 +205,8 @@ export default function ProfileEdit() {
     setLastName(snap.last_name);
     setDni(snap.dni);
     setPhone(snap.phone);
+    setBirthDate(isoToDate(snap.birth_date));
+    setGender((snap.gender as GenderValue | null) ?? null);
     setIsEditing(false);
   };
 
@@ -172,10 +218,7 @@ export default function ProfileEdit() {
     const d = normalizeDniNie(dni);
     const p = normalizePhone(phone);
 
-    setFirstName(f);
-    setLastName(l);
-    setDni(d);
-    setPhone(p);
+    setFirstName(f); setLastName(l); setDni(d); setPhone(p);
 
     if (f && f.length < 2) {
       Alert.alert('Nombre inválido', 'El nombre es demasiado corto.');
@@ -192,23 +235,29 @@ export default function ProfileEdit() {
 
     setSaving(true);
     try {
+      const fullName = [f, l].filter(Boolean).join(' ');
       const { error } = await supabase.from('user_profiles').upsert(
         {
           user_id: session.user.id,
           first_name: f || null,
           last_name: l || null,
+          full_name: fullName || null,
           phone: p || null,
           dni: d || null,
+          birth_date: birthDate ? dateToISO(birthDate) : null,
+          gender: gender ?? null,
         },
         { onConflict: 'user_id' },
       );
       if (error) throw error;
 
-      const fullName = [f, l].filter(Boolean).join(' ');
       if (fullName) await supabase.auth.updateUser({ data: { full_name: fullName } });
 
-      const updated: Snapshot = { first_name: f, last_name: l, dni: d, phone: p };
-      initialRef.current = updated;
+      initialRef.current = {
+        first_name: f, last_name: l, dni: d, phone: p,
+        birth_date: birthDate ? dateToISO(birthDate) : null,
+        gender: gender ?? null,
+      };
       setIsEditing(false);
       Alert.alert('Guardado', 'Tus datos se han actualizado.');
     } catch (e: any) {
@@ -218,11 +267,16 @@ export default function ProfileEdit() {
     }
   };
 
-  const fields: { label: string; value: string }[] = [
-    { label: 'Nombre', value: firstName || '—' },
-    { label: 'Apellidos', value: lastName || '—' },
-    { label: 'DNI / NIE', value: dni || '—' },
-    { label: 'Teléfono', value: phone || '—' },
+  const email = session?.user?.email ?? '—';
+
+  const fields: { label: string; value: string; missing: boolean }[] = [
+    { label: 'Correo electrónico', value: email, missing: false },
+    { label: 'Nombre', value: firstName || 'Sin completar', missing: !firstName },
+    { label: 'Apellidos', value: lastName || 'Sin completar', missing: !lastName },
+    { label: 'DNI / NIE', value: dni || 'Sin completar', missing: !dni },
+    { label: 'Teléfono', value: phone || 'Sin completar', missing: !phone },
+    { label: 'Fecha de nacimiento', value: birthDate ? formatDateDisplay(birthDate) : 'Sin completar', missing: !birthDate },
+    { label: 'Género', value: genderLabel(gender), missing: !gender },
   ];
 
   return (
@@ -239,21 +293,14 @@ export default function ProfileEdit() {
           <Text style={styles.headerTitle}>Datos personales</Text>
           <View style={[styles.headerSide, styles.headerSideRight]}>
             {!loading && !isEditing && (
-              <Pressable
-                onPress={() => setIsEditing(true)}
-                hitSlop={8}
-                style={styles.pencilBtn}
-              >
+              <Pressable onPress={() => setIsEditing(true)} hitSlop={8} style={styles.pencilBtn}>
                 <Text style={styles.pencilText}>✏️</Text>
               </Pressable>
             )}
           </View>
         </View>
 
-        <ScrollView
-          contentContainerStyle={styles.container}
-          keyboardShouldPersistTaps="handled"
-        >
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           {loading ? (
             <View style={styles.loadingRow}>
               <ActivityIndicator />
@@ -261,50 +308,99 @@ export default function ProfileEdit() {
             </View>
           ) : (
             <>
+              {!isEditing && !isProfileComplete({ first_name: firstName, last_name: lastName, dni, phone, birth_date: null, gender: null }) && (
+                <View style={styles.incompleteBanner}>
+                  <Text style={styles.incompleteBannerText}>
+                    Necesitas completar todos tus datos para poder hacer reservas.
+                  </Text>
+                </View>
+              )}
+
               <View style={styles.card}>
                 {isEditing ? (
                   <>
+                    {/* Email — solo lectura siempre */}
+                    <Text style={styles.fieldLabel}>Correo electrónico</Text>
+                    <Text style={[styles.fieldValue, { color: '#888' }]}>{email}</Text>
+                    <View style={styles.divider} />
+
                     <Text style={styles.fieldLabel}>Nombre</Text>
-                    <TextInput
-                      value={firstName}
-                      onChangeText={setFirstName}
-                      placeholder="Nombre"
-                      style={styles.input}
-                      autoCapitalize="words"
-                    />
+                    <TextInput value={firstName} onChangeText={setFirstName} placeholder="Nombre" style={styles.input} autoCapitalize="words" />
                     <View style={styles.divider} />
+
                     <Text style={styles.fieldLabel}>Apellidos</Text>
-                    <TextInput
-                      value={lastName}
-                      onChangeText={setLastName}
-                      placeholder="Apellidos"
-                      style={styles.input}
-                      autoCapitalize="words"
-                    />
+                    <TextInput value={lastName} onChangeText={setLastName} placeholder="Apellidos" style={styles.input} autoCapitalize="words" />
                     <View style={styles.divider} />
+
                     <Text style={styles.fieldLabel}>DNI / NIE</Text>
-                    <TextInput
-                      value={dni}
-                      onChangeText={setDni}
-                      placeholder="12345678Z"
-                      style={styles.input}
-                      autoCapitalize="characters"
-                    />
+                    <TextInput value={dni} onChangeText={setDni} placeholder="12345678Z" style={styles.input} autoCapitalize="characters" />
                     <View style={styles.divider} />
+
                     <Text style={styles.fieldLabel}>Teléfono</Text>
-                    <TextInput
-                      value={phone}
-                      onChangeText={setPhone}
-                      placeholder="+34 600 000 000"
+                    <TextInput value={phone} onChangeText={setPhone} placeholder="+34 600 000 000" style={styles.input} keyboardType="phone-pad" />
+                    <View style={styles.divider} />
+
+                    {/* Fecha de nacimiento */}
+                    <Text style={styles.fieldLabel}>Fecha de nacimiento</Text>
+                    <Pressable
+                      onPress={() => setShowDatePicker(true)}
                       style={styles.input}
-                      keyboardType="phone-pad"
-                    />
+                    >
+                      <Text style={birthDate ? { color: '#111', fontSize: 16 } : styles.inputPlaceholder}>
+                        {birthDate ? formatDateDisplay(birthDate) : 'Selecciona tu fecha de nacimiento'}
+                      </Text>
+                    </Pressable>
+                    {showDatePicker && (
+                      <View>
+                        <DateTimePicker
+                          value={birthDate ?? new Date(1990, 0, 1)}
+                          mode="date"
+                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          maximumDate={new Date()}
+                          minimumDate={new Date(1920, 0, 1)}
+                          onChange={(_, selected) => {
+                            if (Platform.OS === 'android') setShowDatePicker(false);
+                            if (selected) setBirthDate(selected);
+                          }}
+                        />
+                        {Platform.OS === 'ios' && (
+                          <Pressable onPress={() => setShowDatePicker(false)} style={styles.datePickerDone}>
+                            <Text style={styles.datePickerDoneText}>Listo</Text>
+                          </Pressable>
+                        )}
+                      </View>
+                    )}
+                    <View style={styles.divider} />
+
+                    {/* Género */}
+                    <Text style={styles.fieldLabel}>Género</Text>
+                    <View style={styles.genderGrid}>
+                      {GENDER_OPTIONS.map((opt) => (
+                        <Pressable
+                          key={opt.value}
+                          onPress={() => setGender(opt.value)}
+                          style={[
+                            styles.genderChip,
+                            gender === opt.value && styles.genderChipSelected,
+                          ]}
+                        >
+                          <Text style={[
+                            styles.genderChipText,
+                            gender === opt.value && styles.genderChipTextSelected,
+                          ]}>
+                            {opt.label}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
                   </>
                 ) : (
                   fields.map((f, i) => (
                     <React.Fragment key={f.label}>
                       <Text style={styles.fieldLabel}>{f.label}</Text>
-                      <Text style={styles.fieldValue}>{f.value}</Text>
+                      <Text style={[styles.fieldValue, f.missing && styles.fieldMissing]}>
+                        {f.value}
+                      </Text>
                       {i < fields.length - 1 && <View style={styles.divider} />}
                     </React.Fragment>
                   ))
@@ -314,27 +410,18 @@ export default function ProfileEdit() {
               {isEditing && (
                 <View style={styles.editActions}>
                   <Pressable
-                    style={({ pressed }) => [
-                      styles.cancelBtn,
-                      pressed && { opacity: 0.7 },
-                    ]}
+                    style={({ pressed }) => [styles.cancelBtn, pressed && { opacity: 0.7 }]}
                     onPress={rollback}
                     disabled={saving}
                   >
                     <Text style={styles.cancelBtnText}>Cancelar</Text>
                   </Pressable>
                   <Pressable
-                    style={({ pressed }) => [
-                      styles.saveBtn,
-                      saving && { opacity: 0.6 },
-                      pressed && { opacity: 0.8 },
-                    ]}
+                    style={({ pressed }) => [styles.saveBtn, saving && { opacity: 0.6 }, pressed && { opacity: 0.8 }]}
                     onPress={handleSave}
                     disabled={saving}
                   >
-                    <Text style={styles.saveBtnText}>
-                      {saving ? 'Guardando…' : 'Guardar'}
-                    </Text>
+                    <Text style={styles.saveBtnText}>{saving ? 'Guardando…' : 'Guardar'}</Text>
                   </Pressable>
                 </View>
               )}
@@ -364,63 +451,57 @@ const styles = StyleSheet.create({
   headerBack: { color: '#007AFF', fontSize: 16 },
   headerTitle: { fontSize: 17, fontWeight: '600', color: '#111' },
   pencilBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: '#eaeaea',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 34, height: 34, borderRadius: 10,
+    backgroundColor: '#eaeaea', alignItems: 'center', justifyContent: 'center',
   },
   pencilText: { fontSize: 16 },
   container: { padding: 20, paddingBottom: 40, gap: 16 },
   loadingRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 20 },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    overflow: 'hidden',
-  },
+  card: { backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 16, overflow: 'hidden' },
   fieldLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#888',
-    marginTop: 14,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    fontSize: 12, fontWeight: '600', color: '#888',
+    marginTop: 14, textTransform: 'uppercase', letterSpacing: 0.4,
   },
   fieldValue: {
-    fontSize: 16,
-    color: '#111',
+    fontSize: 16, color: '#111',
     paddingVertical: Platform.select({ ios: 10, android: 8 }),
   },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: '#e0e0e0',
-    marginTop: 4,
+  fieldMissing: { color: '#FF9500', fontStyle: 'italic' },
+  incompleteBanner: {
+    backgroundColor: '#FFF3E0', borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderLeftWidth: 3, borderLeftColor: '#FF9500',
   },
+  incompleteBannerText: { fontSize: 14, color: '#8a5700', lineHeight: 20 },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: '#e0e0e0', marginTop: 4 },
   input: {
     fontSize: 16,
     paddingVertical: Platform.select({ ios: 10, android: 8 }),
     color: '#111',
   },
-  editActions: {
-    flexDirection: 'row',
-    gap: 12,
+  inputPlaceholder: { fontSize: 16, color: '#aaa', fontStyle: 'italic' },
+  datePickerDone: {
+    alignSelf: 'flex-end', paddingHorizontal: 16, paddingVertical: 8,
   },
+  datePickerDoneText: { color: '#007AFF', fontSize: 16, fontWeight: '600' },
+  genderGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingVertical: 10 },
+  genderChip: {
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: 20, borderWidth: 1.5, borderColor: '#ddd',
+    backgroundColor: '#f9f9f9',
+  },
+  genderChipSelected: { borderColor: '#007AFF', backgroundColor: '#EAF2FF' },
+  genderChipText: { fontSize: 14, color: '#555' },
+  genderChipTextSelected: { color: '#007AFF', fontWeight: '600' },
+  editActions: { flexDirection: 'row', gap: 12 },
   cancelBtn: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 15,
-    alignItems: 'center',
-    backgroundColor: '#e5e5ea',
+    flex: 1, borderRadius: 12, paddingVertical: 15,
+    alignItems: 'center', backgroundColor: '#e5e5ea',
   },
   cancelBtnText: { color: '#111', fontSize: 16, fontWeight: '600' },
   saveBtn: {
-    flex: 1,
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-    paddingVertical: 15,
-    alignItems: 'center',
+    flex: 1, backgroundColor: '#007AFF', borderRadius: 12,
+    paddingVertical: 15, alignItems: 'center',
   },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });

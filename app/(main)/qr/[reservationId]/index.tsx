@@ -100,6 +100,7 @@ export default function ReservationDetailUserScreen() {
   const [reservation, setReservation] = useState<ReservationDetail | null>(null);
   const [extras, setExtras] = useState<ExtraLine[]>([]);
   const [travelers, setTravelers] = useState<TravelerRow[]>([]);
+  const [placeNames, setPlaceNames] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -122,9 +123,22 @@ export default function ReservationDetailUserScreen() {
       router.back();
       return;
     }
-    setReservation(r as ReservationDetail);
+    const typed = r as ReservationDetail;
+    setReservation(typed);
 
-    if ((r as ReservationDetail).status === 'pending') {
+    if (typed.place_ids?.length) {
+      const { data: placesData } = await supabase
+        .from('places')
+        .select('id, name')
+        .in('id', typed.place_ids);
+      if (placesData) {
+        const map: Record<number, string> = {};
+        for (const p of placesData) map[p.id as number] = p.name as string;
+        setPlaceNames(map);
+      }
+    }
+
+    if (typed.status === 'pending') {
       setConfirming(true);
       setLoading(false);
       const interval = setInterval(async () => {
@@ -225,6 +239,15 @@ export default function ReservationDetailUserScreen() {
     ]);
   };
 
+  const placeLabel = (i: number) => {
+    const id = reservation.place_ids?.[i];
+    return id != null && placeNames[id] ? placeNames[id] : `Plaza ${i + 1}`;
+  };
+
+  const allPlacesLabel = reservation.place_ids?.length
+    ? reservation.place_ids.map((id) => placeNames[id] ?? `#${id}`).join(', ')
+    : null;
+
   // Build per-plaza data
   const plazaData = Array.from({ length: numPlaces }, (_, i) => {
     const snap = reservation.vehicles_snapshot?.find(s => s.place_index === i);
@@ -286,9 +309,8 @@ export default function ReservationDetailUserScreen() {
           <Row label="Entrada" value={formatDate(reservation.start_date)} />
           <Row label="Salida" value={formatDate(reservation.end_date)} />
           <Row label="Noches" value={String(nights)} />
-          {numPlaces > 1 && <Row label="Plazas" value={String(numPlaces)} />}
-          {reservation.access_code && !cancelled && (
-            <Row label="Código de acceso" value={reservation.access_code} />
+          {allPlacesLabel && (
+            <Row label={numPlaces > 1 ? 'Plazas' : 'Plaza'} value={allPlacesLabel} />
           )}
         </View>
 
@@ -296,7 +318,7 @@ export default function ReservationDetailUserScreen() {
         {plazaData.map(({ vehicle, plazaTravelers, plazaExtras }, i) => (
           <View key={i}>
             {numPlaces > 1 && (
-              <Text style={styles.plazaLabel}>Plaza {i + 1}</Text>
+              <Text style={styles.plazaLabel}>{placeLabel(i)}</Text>
             )}
 
             {/* Vehículo */}
@@ -309,9 +331,6 @@ export default function ReservationDetailUserScreen() {
                   value={[vehicle.brand, vehicle.model].filter(Boolean).join(' ') || '—'}
                 />
                 <Row label="Matrícula" value={vehicle.plate || '—'} />
-                {vehicle.length_m != null && (
-                  <Row label="Longitud" value={`${vehicle.length_m} m`} />
-                )}
               </View>
             )}
 
@@ -372,7 +391,7 @@ export default function ReservationDetailUserScreen() {
             plazaData.map(({ extrasTotal, baseTotal }, i) => (
               <View key={i} style={{ marginBottom: 10 }}>
                 <Text style={{ fontSize: 13, fontWeight: '700', color: '#555', marginBottom: 4 }}>
-                  Plaza {i + 1}
+                  {placeLabel(i)}
                 </Text>
                 <Row
                   label={`${nights} noche${nights !== 1 ? 's' : ''} × ${formatEuro(reservation.nightly_amount_cents)}`}
@@ -382,7 +401,7 @@ export default function ReservationDetailUserScreen() {
                   <Row label="Extras" value={formatEuro(extrasTotal)} />
                 )}
                 <View style={[styles.row, { borderBottomWidth: 0, paddingTop: 2 }]}>
-                  <Text style={{ color: '#444', fontWeight: '600', flex: 1 }}>Subtotal plaza {i + 1}</Text>
+                  <Text style={{ color: '#444', fontWeight: '600', flex: 1 }}>Subtotal {placeLabel(i)}</Text>
                   <Text style={{ fontWeight: '700', color: '#111', flex: 1, textAlign: 'right' }}>
                     {formatEuro(baseTotal + extrasTotal)}
                   </Text>

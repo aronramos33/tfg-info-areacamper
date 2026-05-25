@@ -20,7 +20,6 @@ export type NewVehicleDraft = {
   model: string;
   plate: string;
   alias: string;
-  length_m: string;
 };
 
 export type VehicleSelection =
