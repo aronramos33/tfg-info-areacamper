@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   SafeAreaView,
@@ -56,6 +57,10 @@ export default function QrScreen() {
   const [selectedId, setSelectedId] = useState<number | null>(
     params.reservation_id ? Number(params.reservation_id) : null,
   );
+  // Ref para acceder al valor actual de selectedId dentro del callback estable
+  // de useFocusEffect sin que sea una dependencia que lo reinvoque.
+  const selectedIdRef = useRef(selectedId);
+  useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showPast, setShowPast] = useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
@@ -67,74 +72,74 @@ export default function QrScreen() {
   // “ahora” estable (para evitar warnings/hooks)
   const now = useMemo(() => dayjs(), []);
 
-  useEffect(() => {
-    let alive = true;
+  // useFocusEffect recarga la lista cada vez que la pantalla gana foco:
+  // cubre el caso de volver desde el detalle tras cancelar/modificar una reserva.
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
 
-    const run = async () => {
-      setLoading(true);
-      setErrorMsg(null);
+      const run = async () => {
+        setLoading(true);
+        setErrorMsg(null);
 
-      const { data: sessionData } = await supabase.auth.getSession();
-      const userId = sessionData.session?.user?.id;
+        const { data: sessionData } = await supabase.auth.getSession();
+        const userId = sessionData.session?.user?.id;
 
-      if (!userId) {
+        if (!userId) {
+          if (!alive) return;
+          setErrorMsg('No hay sesión iniciada.');
+          setLoading(false);
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from('reservations')
+          .select(
+            'id,user_id,start_date,end_date,status,payment_status,total_amount_cents,access_code,access_expires_at,created_at,modified_at,cancelled_at',
+          )
+          .eq('user_id', userId)
+          .neq('status', 'pending')
+          .order('start_date', { ascending: true });
+
         if (!alive) return;
-        setErrorMsg('No hay sesión iniciada.');
+
+        if (error) {
+          setErrorMsg(error.message);
+          setReservations([]);
+          setLoading(false);
+          return;
+        }
+
+        const rows = (data ?? []) as Reservation[];
+        setReservations(rows);
+
+        // Auto-selección solo si no hay ninguna reserva seleccionada aún.
+        // Usamos el ref para leer el valor actual sin que sea dep del callback.
+        if (!selectedIdRef.current && rows.length > 0) {
+          const active = rows.find((r) => {
+            const s = dayjs(r.start_date);
+            const e = dayjs(r.end_date).endOf('day');
+            return now.isAfter(s) && now.isBefore(e);
+          });
+          const upcoming = rows.find((r) => dayjs(r.start_date).isAfter(now));
+          const past = [...rows]
+            .reverse()
+            .find((r) => dayjs(r.end_date).endOf('day').isBefore(now));
+
+          setSelectedId(
+            (active ?? upcoming ?? past ?? rows[0])?.id ?? rows[0].id,
+          );
+        }
+
         setLoading(false);
-        return;
-      }
+      };
 
-      const { data, error } = await supabase
-        .from('reservations')
-        .select(
-          'id,user_id,start_date,end_date,status,payment_status,total_amount_cents,access_code,access_expires_at,created_at,modified_at,cancelled_at',
-        )
-        .eq('user_id', userId)
-        .neq('status', 'pending')
-        .order('start_date', { ascending: true });
-
-      if (!alive) return;
-
-      if (error) {
-        setErrorMsg(error.message);
-        setReservations([]);
-        setLoading(false);
-        return;
-      }
-
-      const rows = (data ?? []) as Reservation[];
-      setReservations(rows);
-
-      // Selección por defecto:
-      // 1) activa (ahora entre start/end)
-      // 2) próxima
-      // 3) última pasada
-      if (!selectedId && rows.length > 0) {
-        const active = rows.find((r) => {
-          const s = dayjs(r.start_date);
-          const e = dayjs(r.end_date).endOf('day');
-          return now.isAfter(s) && now.isBefore(e);
-        });
-
-        const upcoming = rows.find((r) => dayjs(r.start_date).isAfter(now));
-        const past = [...rows]
-          .reverse()
-          .find((r) => dayjs(r.end_date).endOf('day').isBefore(now));
-
-        setSelectedId(
-          (active ?? upcoming ?? past ?? rows[0])?.id ?? rows[0].id,
-        );
-      }
-
-      setLoading(false);
-    };
-
-    run();
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      run();
+      return () => {
+        alive = false;
+      };
+    }, []) // deps vacías: el callback es estable; selectedId se lee por ref
+  );
 
   useEffect(() => {
     if (params.reservation_id) setSelectedId(Number(params.reservation_id));
@@ -297,8 +302,11 @@ export default function QrScreen() {
 
     return (
       <Pressable
-        onLongPress={() => setSelectedId(r.id)}
-        onPress={() => router.push(`/(main)/qr/${r.id}`)}
+        onPress={() =>
+          isSelected
+            ? router.push(`/(main)/qr/${r.id}`)
+            : setSelectedId(r.id)
+        }
         style={[styles.item, isSelected && styles.itemActive]}
       >
         <View style={styles.itemHeader}>

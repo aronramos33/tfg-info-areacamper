@@ -6,12 +6,12 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 const PENDING_KEY = 'pending_post_payment_reservation_id';
 
 export default function StripeRedirect() {
-  const { reservation_id } = useLocalSearchParams<{ reservation_id?: string }>();
+  const { reservation_id, mode } = useLocalSearchParams<{ reservation_id?: string; mode?: string }>();
   const router = useRouter();
 
   useEffect(() => {
     const go = async () => {
-      console.log('[stripe-redirect] montado, param reservation_id:', reservation_id);
+      console.log('[stripe-redirect] mode:', mode, 'reservation_id:', reservation_id);
       const id =
         reservation_id ?? (await AsyncStorage.getItem(PENDING_KEY)) ?? null;
       await AsyncStorage.removeItem(PENDING_KEY);

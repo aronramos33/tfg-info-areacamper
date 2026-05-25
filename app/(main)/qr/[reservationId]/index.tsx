@@ -52,17 +52,16 @@ type ReservationDetail = {
   modified_at: string | null;
   cancelled_at: string | null;
   access_code: string | null;
-  // Legacy single-vehicle fields (kept for backward compat with old reservations)
   vehicle_brand: string | null;
   vehicle_model: string | null;
   vehicle_plate: string | null;
   vehicle_alias: string | null;
   vehicle_length_m: number | null;
-  // Multi-vehicle snapshot (new reservations)
   vehicles_snapshot: VehicleSnapshot[];
 };
 
 type ExtraLine = {
+  place_index: number | null;
   quantity: number;
   unit_amount_cents: number;
   line_total_cents: number;
@@ -98,9 +97,7 @@ export default function ReservationDetailUserScreen() {
   const router = useRouter();
   const { session } = useAuth();
 
-  const [reservation, setReservation] = useState<ReservationDetail | null>(
-    null,
-  );
+  const [reservation, setReservation] = useState<ReservationDetail | null>(null);
   const [extras, setExtras] = useState<ExtraLine[]>([]);
   const [travelers, setTravelers] = useState<TravelerRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -127,7 +124,6 @@ export default function ReservationDetailUserScreen() {
     }
     setReservation(r as ReservationDetail);
 
-    // Si está pendiente de confirmación (webhook aún no disparó), poll hasta confirmar
     if ((r as ReservationDetail).status === 'pending') {
       setConfirming(true);
       setLoading(false);
@@ -144,7 +140,6 @@ export default function ReservationDetailUserScreen() {
           clearInterval(interval);
         }
       }, 2000);
-      // Timeout máximo 60s
       setTimeout(() => { clearInterval(interval); setConfirming(false); }, 60000);
       return;
     }
@@ -152,13 +147,15 @@ export default function ReservationDetailUserScreen() {
     const [extrasRes, travelersRes] = await Promise.all([
       supabase
         .from('reservation_extras')
-        .select('quantity, unit_amount_cents, line_total_cents, pricing_type, extras(code, name_es)')
-        .eq('reservation_id', Number(reservationId)),
+        .select('place_index, quantity, unit_amount_cents, line_total_cents, pricing_type, extras(code, name_es)')
+        .eq('reservation_id', Number(reservationId))
+        .order('place_index', { ascending: true }),
       supabase
         .from('travelers')
         .select('id, place_index, full_name, doc_type, doc_number, nationality, birth_date, gender, country_of_residence, city_of_residence, phone, email')
         .eq('reservation_id', Number(reservationId))
-        .order('place_index', { ascending: true }),
+        .order('place_index', { ascending: true })
+        .order('is_main_traveler', { ascending: false }),
     ]);
 
     setExtras(((extrasRes.data ?? []) as unknown) as ExtraLine[]);
@@ -183,18 +180,17 @@ export default function ReservationDetailUserScreen() {
   }
 
   const nights = nightsBetween(reservation.start_date, reservation.end_date);
+  const numPlaces = reservation.num_places ?? 1;
   const canModify = isModifiable(reservation.start_date, reservation.status);
   const canCancel = isCancellable(reservation.start_date, reservation.status);
   const cancelled = reservation.status === 'cancelled';
   const refunded = (reservation.refund_amount_cents ?? 0) > 0;
+  const hasPlaceIndex = extras.some(e => e.place_index !== null);
 
   const handleCancel = () => {
     if (!reservation) return;
     const tier = computeRefundTier(reservation.start_date);
-    const refund = computeRefundAmountCents(
-      reservation.total_amount_cents ?? 0,
-      tier,
-    );
+    const refund = computeRefundAmountCents(reservation.total_amount_cents ?? 0, tier);
     const policyText = describeRefundPolicy(tier);
     const message =
       refund > 0
@@ -213,10 +209,7 @@ export default function ReservationDetailUserScreen() {
           );
           setCancelling(false);
           if (error) {
-            Alert.alert(
-              'Error',
-              error.message ?? 'No se pudo cancelar la reserva.',
-            );
+            Alert.alert('Error', error.message ?? 'No se pudo cancelar la reserva.');
             return;
           }
           const refundedCents = Number(data?.refund_amount_cents ?? 0);
@@ -225,27 +218,39 @@ export default function ReservationDetailUserScreen() {
             refundedCents > 0
               ? `Hemos iniciado un reembolso de ${formatEuro(refundedCents)} en tu método de pago.\n\nTu banco lo reflejará en tu cuenta en los próximos 5-10 días laborables.`
               : 'La reserva ha sido cancelada.',
-            [
-              {
-                text: 'OK',
-                onPress: () => {
-                  void load();
-                },
-              },
-            ],
+            [{ text: 'OK', onPress: () => { void load(); } }],
           );
         },
       },
     ]);
   };
 
+  // Build per-plaza data
+  const plazaData = Array.from({ length: numPlaces }, (_, i) => {
+    const snap = reservation.vehicles_snapshot?.find(s => s.place_index === i);
+    const vehicle = snap ?? (i === 0 ? {
+      place_index: 0,
+      vehicle_id: null,
+      brand: reservation.vehicle_brand ?? '',
+      model: reservation.vehicle_model ?? '',
+      plate: reservation.vehicle_plate ?? '',
+      alias: reservation.vehicle_alias,
+      length_m: reservation.vehicle_length_m,
+    } : null);
+    const plazaTravelers = travelers.filter(t => (t.place_index ?? 0) === i);
+    const plazaExtras = hasPlaceIndex
+      ? extras.filter(e => (e.place_index ?? 0) === i)
+      : (i === 0 ? extras : []);
+    const extrasTotal = plazaExtras.reduce((s, e) => s + e.line_total_cents, 0);
+    const baseTotal = (reservation.nightly_amount_cents ?? 0) * nights;
+    return { vehicle, plazaTravelers, plazaExtras, extrasTotal, baseTotal };
+  });
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F7F8FB' }}>
       <ScrollView contentContainerStyle={styles.container}>
         <Pressable
-          onPress={() =>
-            router.canGoBack() ? router.back() : router.replace('/(main)/qr')
-          }
+          onPress={() => router.canGoBack() ? router.back() : router.replace('/(main)/qr')}
           style={styles.backBtn}
         >
           <Text style={styles.backText}>‹ Volver</Text>
@@ -263,22 +268,9 @@ export default function ReservationDetailUserScreen() {
         )}
 
         <View style={styles.badgeRow}>
-          <View
-            style={[
-              styles.badge,
-              cancelled
-                ? styles.badgeCancelled
-                : reservation.payment_status === 'paid'
-                  ? styles.badgePaid
-                  : styles.badgePending,
-            ]}
-          >
+          <View style={[styles.badge, cancelled ? styles.badgeCancelled : reservation.payment_status === 'paid' ? styles.badgePaid : styles.badgePending]}>
             <Text style={styles.badgeText}>
-              {cancelled
-                ? 'Cancelada'
-                : reservation.payment_status === 'paid'
-                  ? 'Pagada'
-                  : 'Pendiente'}
+              {cancelled ? 'Cancelada' : reservation.payment_status === 'paid' ? 'Pagada' : 'Pendiente'}
             </Text>
           </View>
           {reservation.modified_at && !cancelled && (
@@ -288,96 +280,79 @@ export default function ReservationDetailUserScreen() {
           )}
         </View>
 
-        {/* Estancia */}
+        {/* ── ESTANCIA ── */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>🏕️ Estancia</Text>
           <Row label="Entrada" value={formatDate(reservation.start_date)} />
           <Row label="Salida" value={formatDate(reservation.end_date)} />
           <Row label="Noches" value={String(nights)} />
-          {(reservation.num_places ?? 1) > 1 && (
-            <Row label="Plazas" value={String(reservation.num_places)} />
-          )}
+          {numPlaces > 1 && <Row label="Plazas" value={String(numPlaces)} />}
           {reservation.access_code && !cancelled && (
             <Row label="Código de acceso" value={reservation.access_code} />
           )}
         </View>
 
-        {/* Vehículos */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>🚐 Vehículo{(reservation.vehicles_snapshot?.length ?? 0) > 1 ? 's' : ''}</Text>
-          {(reservation.vehicles_snapshot?.length ?? 0) > 0 ? (
-            reservation.vehicles_snapshot.map((v, i) => (
-              <View key={i} style={{ marginBottom: i < reservation.vehicles_snapshot.length - 1 ? 10 : 0 }}>
-                {reservation.vehicles_snapshot.length > 1 && (
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#888', marginBottom: 4 }}>
-                    Plaza {v.place_index + 1}
-                  </Text>
-                )}
-                {v.alias ? <Row label="Alias" value={v.alias} /> : null}
+        {/* ── POR PLAZA ── */}
+        {plazaData.map(({ vehicle, plazaTravelers, plazaExtras }, i) => (
+          <View key={i}>
+            {numPlaces > 1 && (
+              <Text style={styles.plazaLabel}>Plaza {i + 1}</Text>
+            )}
+
+            {/* Vehículo */}
+            {vehicle && (vehicle.plate || vehicle.brand) && (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>🚐 Vehículo</Text>
+                {vehicle.alias ? <Row label="Alias" value={vehicle.alias} /> : null}
                 <Row
-                  label="Marca y modelo"
-                  value={[v.brand, v.model].filter(Boolean).join(' ') || '—'}
+                  label="Vehículo"
+                  value={[vehicle.brand, vehicle.model].filter(Boolean).join(' ') || '—'}
                 />
-                <Row label="Matrícula" value={v.plate || '—'} />
-                {v.length_m != null && <Row label="Longitud" value={`${v.length_m} m`} />}
-              </View>
-            ))
-          ) : (
-            // Fallback para reservas antiguas sin vehicles_snapshot
-            <>
-              {reservation.vehicle_alias && (
-                <Row label="Alias" value={reservation.vehicle_alias} />
-              )}
-              <Row
-                label="Marca y modelo"
-                value={
-                  [reservation.vehicle_brand, reservation.vehicle_model]
-                    .filter(Boolean)
-                    .join(' ') || '—'
-                }
-              />
-              <Row label="Matrícula" value={reservation.vehicle_plate ?? '—'} />
-              {reservation.vehicle_length_m != null && (
-                <Row label="Longitud" value={`${reservation.vehicle_length_m} m`} />
-              )}
-            </>
-          )}
-        </View>
-
-        {/* Extras */}
-        {extras.length > 0 && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>✨ Extras</Text>
-            {extras.map((e, i) => (
-              <Row
-                key={i}
-                label={`${e.extras?.name_es ?? '—'}${e.quantity > 1 ? ` ×${e.quantity}` : ''}`}
-                value={formatEuro(e.line_total_cents)}
-              />
-            ))}
-          </View>
-        )}
-
-        {/* Viajeros */}
-        {travelers.length > 0 && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>🪪 Viajeros registrados</Text>
-            {travelers.map((t, i) => (
-              <View key={t.id} style={{ marginBottom: i < travelers.length - 1 ? 12 : 0 }}>
-                {travelers.length > 1 && (
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#888', marginBottom: 4 }}>
-                    Plaza {(t.place_index ?? i) + 1}
-                  </Text>
+                <Row label="Matrícula" value={vehicle.plate || '—'} />
+                {vehicle.length_m != null && (
+                  <Row label="Longitud" value={`${vehicle.length_m} m`} />
                 )}
-                <Row label="Nombre" value={t.full_name} />
-                <Row label="Documento" value={`${t.doc_type.toUpperCase()} ${t.doc_number}`} />
-                <Row label="Nacionalidad" value={t.nationality} />
-                <Row label="Nacimiento" value={t.birth_date} />
               </View>
-            ))}
-          </View>
-        )}
+            )}
 
+            {/* Viajeros */}
+            {plazaTravelers.length > 0 && (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>🪪 Viajeros</Text>
+                {plazaTravelers.map((t, ti) => (
+                  <View key={t.id} style={ti > 0 ? { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#f5f5f5' } : undefined}>
+                    <Text style={{ fontWeight: '700', fontSize: 14, marginBottom: 4 }}>
+                      {ti === 0 && i === 0 ? '(Titular) ' : ''}{t.full_name}
+                    </Text>
+                    <Row label="Documento" value={`${t.doc_type.toUpperCase()} ${t.doc_number}`} />
+                    {t.nationality ? <Row label="Nacionalidad" value={t.nationality} /> : null}
+                    {t.birth_date ? <Row label="Nacimiento" value={formatDate(t.birth_date)} /> : null}
+                    {t.country_of_residence ? <Row label="País" value={t.country_of_residence} /> : null}
+                    {t.city_of_residence ? <Row label="Localidad" value={t.city_of_residence} /> : null}
+                    {t.phone ? <Row label="Teléfono" value={t.phone} /> : null}
+                    {t.email ? <Row label="Email" value={t.email} /> : null}
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Extras de esta plaza */}
+            {plazaExtras.length > 0 && (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>✨ Extras</Text>
+                {plazaExtras.map((e, ei) => (
+                  <Row
+                    key={ei}
+                    label={`${e.extras?.name_es ?? '—'}${e.quantity > 1 ? ` ×${e.quantity}` : ''}`}
+                    value={formatEuro(e.line_total_cents)}
+                  />
+                ))}
+              </View>
+            )}
+          </View>
+        ))}
+
+        {/* Aviso viajeros pendientes */}
         {travelers.length === 0 && !cancelled && (
           <View style={[styles.card, { borderLeftWidth: 3, borderLeftColor: '#FF9500' }]}>
             <Text style={{ fontSize: 13, color: '#7a4f00', fontWeight: '600' }}>
@@ -389,36 +364,53 @@ export default function ReservationDetailUserScreen() {
           </View>
         )}
 
-        {/* Desglose */}
+        {/* ── DESGLOSE ── */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>💰 Desglose</Text>
-          <Row
-            label={`Estancia (${nights} noche${nights !== 1 ? 's' : ''})`}
-            value={formatEuro(
-              (reservation.nightly_amount_cents ?? 0) *
-                nights *
-                (reservation.num_places ?? 1),
-            )}
-          />
-          {extras.length > 0 && (
-            <Row
-              label="Extras"
-              value={formatEuro(
-                extras.reduce((s, e) => s + e.line_total_cents, 0),
+
+          {numPlaces > 1 ? (
+            plazaData.map(({ extrasTotal, baseTotal }, i) => (
+              <View key={i} style={{ marginBottom: 10 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#555', marginBottom: 4 }}>
+                  Plaza {i + 1}
+                </Text>
+                <Row
+                  label={`${nights} noche${nights !== 1 ? 's' : ''} × ${formatEuro(reservation.nightly_amount_cents)}`}
+                  value={formatEuro(baseTotal)}
+                />
+                {extrasTotal > 0 && (
+                  <Row label="Extras" value={formatEuro(extrasTotal)} />
+                )}
+                <View style={[styles.row, { borderBottomWidth: 0, paddingTop: 2 }]}>
+                  <Text style={{ color: '#444', fontWeight: '600', flex: 1 }}>Subtotal plaza {i + 1}</Text>
+                  <Text style={{ fontWeight: '700', color: '#111', flex: 1, textAlign: 'right' }}>
+                    {formatEuro(baseTotal + extrasTotal)}
+                  </Text>
+                </View>
+              </View>
+            ))
+          ) : (
+            <>
+              <Row
+                label={`Estancia (${nights} noche${nights !== 1 ? 's' : ''})`}
+                value={formatEuro((reservation.nightly_amount_cents ?? 0) * nights)}
+              />
+              {extras.length > 0 && (
+                <Row
+                  label="Extras"
+                  value={formatEuro(extras.reduce((s, e) => s + e.line_total_cents, 0))}
+                />
               )}
-            />
+            </>
           )}
+
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Total pagado</Text>
-            <Text style={styles.totalValue}>
-              {formatEuro(reservation.total_amount_cents)}
-            </Text>
+            <Text style={styles.totalValue}>{formatEuro(reservation.total_amount_cents)}</Text>
           </View>
           {refunded && (
             <View style={[styles.totalRow, { paddingTop: 4 }]}>
-              <Text style={[styles.totalLabel, { color: '#c0392b' }]}>
-                Reembolsado
-              </Text>
+              <Text style={[styles.totalLabel, { color: '#c0392b' }]}>Reembolsado</Text>
               <Text style={[styles.totalValue, { color: '#c0392b' }]}>
                 −{formatEuro(reservation.refund_amount_cents)}
               </Text>
@@ -436,14 +428,12 @@ export default function ReservationDetailUserScreen() {
           </View>
         )}
 
-        {/* Acciones */}
+        {/* ── ACCIONES ── */}
         {(canModify || canCancel) && (
           <View style={styles.actionsRow}>
             {canModify && (
               <Pressable
-                onPress={() =>
-                  router.push(`/(main)/qr/${reservation.id}/edit`)
-                }
+                onPress={() => router.push(`/(main)/qr/${reservation.id}/edit`)}
                 style={[styles.actionBtn, styles.modifyBtn]}
               >
                 <Text style={styles.modifyBtnText}>Modificar reserva</Text>
@@ -453,11 +443,7 @@ export default function ReservationDetailUserScreen() {
               <Pressable
                 onPress={handleCancel}
                 disabled={cancelling}
-                style={[
-                  styles.actionBtn,
-                  styles.cancelBtn,
-                  cancelling && { opacity: 0.5 },
-                ]}
+                style={[styles.actionBtn, styles.cancelBtn, cancelling && { opacity: 0.5 }]}
               >
                 <Text style={styles.cancelBtnText}>
                   {cancelling ? 'Cancelando…' : 'Cancelar reserva'}
@@ -474,8 +460,7 @@ export default function ReservationDetailUserScreen() {
         )}
         {cancelled && (
           <Text style={styles.infoText}>
-            Esta reserva fue cancelada el{' '}
-            {formatDate(reservation.cancelled_at)}.
+            Esta reserva fue cancelada el {formatDate(reservation.cancelled_at)}.
           </Text>
         )}
       </ScrollView>
@@ -500,16 +485,19 @@ const styles = StyleSheet.create({
   title: { fontSize: 26, fontWeight: '800', color: '#111', marginBottom: 8 },
 
   badgeRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  badge: {
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 999,
-  },
+  badge: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 999 },
   badgePaid: { backgroundColor: '#e8f5e9' },
   badgePending: { backgroundColor: '#fff3cd' },
   badgeCancelled: { backgroundColor: '#fdecea' },
   badgeModified: { backgroundColor: '#e3f2fd' },
   badgeText: { fontWeight: '700', fontSize: 13 },
+
+  plazaLabel: {
+    fontSize: 13, fontWeight: '800', color: '#1A73E8',
+    textTransform: 'uppercase', letterSpacing: 0.8,
+    marginBottom: 8, marginTop: 4,
+    paddingHorizontal: 2,
+  },
 
   card: {
     backgroundColor: 'white',
@@ -532,44 +520,27 @@ const styles = StyleSheet.create({
     borderBottomColor: '#f5f5f5',
   },
   rowLabel: { fontSize: 14, color: '#888', flex: 1 },
-  rowValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111',
-    textAlign: 'right',
-    flex: 1,
-  },
+  rowValue: { fontSize: 14, fontWeight: '600', color: '#111', textAlign: 'right', flex: 1 },
 
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingTop: 12,
     marginTop: 4,
+    borderTopWidth: 1.5,
+    borderTopColor: '#E5E7EB',
   },
   totalLabel: { fontSize: 16, fontWeight: '800' },
   totalValue: { fontSize: 16, fontWeight: '800', color: '#111' },
 
   actionsRow: { gap: 12, marginTop: 8 },
-  actionBtn: {
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: 'center',
-  },
+  actionBtn: { paddingVertical: 14, borderRadius: 14, alignItems: 'center' },
   modifyBtn: { backgroundColor: '#1A73E8' },
   modifyBtnText: { color: 'white', fontWeight: '700', fontSize: 15 },
-  cancelBtn: {
-    backgroundColor: 'white',
-    borderWidth: 2,
-    borderColor: '#c0392b',
-  },
+  cancelBtn: { backgroundColor: 'white', borderWidth: 2, borderColor: '#c0392b' },
   cancelBtnText: { color: '#c0392b', fontWeight: '700', fontSize: 15 },
 
-  infoText: {
-    color: '#888',
-    fontStyle: 'italic',
-    marginTop: 8,
-    textAlign: 'center',
-  },
+  infoText: { color: '#888', fontStyle: 'italic', marginTop: 8, textAlign: 'center' },
   refundNote: {
     backgroundColor: '#fff4e5',
     borderRadius: 12,
@@ -578,14 +549,6 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#FF9500',
   },
-  refundNoteTitle: {
-    fontWeight: '800',
-    marginBottom: 4,
-    color: '#7a4f00',
-  },
-  refundNoteText: {
-    color: '#5c4400',
-    fontSize: 13,
-    lineHeight: 18,
-  },
+  refundNoteTitle: { fontWeight: '800', marginBottom: 4, color: '#7a4f00' },
+  refundNoteText: { color: '#5c4400', fontSize: 13, lineHeight: 18 },
 });
