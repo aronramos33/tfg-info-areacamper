@@ -169,21 +169,11 @@ export default function ParkingMapPicker({
             Pérgola
           </SvgText>
 
-          {/* Módulos servicios (center-right) */}
+          {/* Módulo servicios (center-right) */}
           <Rect
             x={440}
             y={78}
-            width={72}
-            height={50}
-            fill="#6B7280"
-            stroke="#4B5563"
-            strokeWidth={1}
-            rx={4}
-          />
-          <Rect
-            x={518}
-            y={78}
-            width={72}
+            width={150}
             height={50}
             fill="#6B7280"
             stroke="#4B5563"
@@ -191,7 +181,7 @@ export default function ParkingMapPicker({
             rx={4}
           />
           <SvgText
-            x={516}
+            x={515}
             y={107}
             fontSize={10}
             fontWeight="700"

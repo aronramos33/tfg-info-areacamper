@@ -35,7 +35,6 @@ type Reservation = {
   payment_status: string;
   full_name: string | null;
   total_amount_cents: number | null;
-  user_id: string;
 };
 
 type MaintenanceBlock = {
@@ -97,26 +96,19 @@ export default function AdminMapaPlazas() {
   // ── Load ───────────────────────────────────────────────────────────────────
   const load = async () => {
     setLoading(true);
-    const [placesRes, reservationsRes, maintenanceRes, ownersRes] =
-      await Promise.all([
-        supabase.from('places').select('*').order('id'),
-        supabase
-          .from('reservations')
-          .select(
-            'id,place_ids,num_places,start_date,end_date,payment_status,full_name,total_amount_cents,user_id',
-          )
-          .eq('payment_status', 'paid'),
-        supabase.from('maintenance_blocks').select('*'),
-        supabase.from('owners').select('user_id'),
-      ]);
-
-    const ownerIds = new Set((ownersRes.data ?? []).map((o: any) => o.user_id));
-    const allReservations = (
-      (reservationsRes.data ?? []) as Reservation[]
-    ).filter((r) => !ownerIds.has(r.user_id));
+    const [placesRes, reservationsRes, maintenanceRes] = await Promise.all([
+      supabase.from('places').select('*').order('id'),
+      supabase
+        .from('reservations')
+        .select(
+          'id,place_ids,num_places,start_date,end_date,payment_status,full_name,total_amount_cents',
+        )
+        .eq('payment_status', 'paid'),
+      supabase.from('maintenance_blocks').select('*'),
+    ]);
 
     setPlaces(placesRes.data ?? []);
-    setReservations(allReservations);
+    setReservations((reservationsRes.data ?? []) as Reservation[]);
     setMaintenanceBlocks((maintenanceRes.data ?? []) as MaintenanceBlock[]);
     setLoading(false);
   };

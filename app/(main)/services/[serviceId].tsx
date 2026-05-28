@@ -8,9 +8,19 @@ import {
   ScrollView,
   StyleSheet,
   Image,
+  Linking,
+  Platform,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../../lib/supabase';
+
+const LOCATION_ADDRESS = 'Calle Ametler 8, 46728 Xauxa, Valencia';
+const MAPS_URL = Platform.select({
+  ios: `maps://0,0?q=${encodeURIComponent(LOCATION_ADDRESS)}`,
+  android: `geo:0,0?q=${encodeURIComponent(LOCATION_ADDRESS)}`,
+  default: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(LOCATION_ADDRESS)}`,
+});
 
 type Service = {
   id: string;
@@ -59,6 +69,8 @@ export default function ServiceDetail() {
     );
   }
 
+  const isLocation = service.id === 'ubicacion';
+
   return (
     <SafeAreaView style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.container}>
@@ -66,12 +78,31 @@ export default function ServiceDetail() {
           <Image source={{ uri: service.image_url }} style={styles.image} />
         ) : (
           <View style={[styles.image, styles.imagePlaceholder]}>
-            <Text style={{ color: '#666' }}>Sin imagen</Text>
+            <Text style={{ fontSize: 40 }}>📍</Text>
           </View>
         )}
 
         <View style={styles.content}>
           <Text style={styles.title}>{service.name_es}</Text>
+
+          {isLocation && (
+            <>
+              <View style={styles.addressCard}>
+                <Text style={styles.addressLabel}>Dirección</Text>
+                <Text style={styles.addressText}>{LOCATION_ADDRESS}</Text>
+              </View>
+
+              <Pressable
+                style={({ pressed }) => [
+                  styles.mapsButton,
+                  pressed && { opacity: 0.8 },
+                ]}
+                onPress={() => Linking.openURL(MAPS_URL!)}
+              >
+                <Text style={styles.mapsButtonText}>Abrir en Maps</Text>
+              </Pressable>
+            </>
+          )}
 
           <Text style={styles.description}>
             {service.long_description_es ??
@@ -100,7 +131,6 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
 
-  // 🔥 Imagen de borde a borde SIN márgenes, redondeada solo por abajo (Airbnb style)
   image: {
     width: '100%',
     height: 260,
@@ -114,7 +144,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  // 🔥 Margen lateral solo en el contenido, no en la imagen
   content: {
     paddingHorizontal: 20,
     paddingTop: 20,
@@ -123,7 +152,42 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 26,
     fontWeight: '700',
-    marginBottom: 12,
+    marginBottom: 16,
+  },
+
+  addressCard: {
+    backgroundColor: '#F7F8FB',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  addressLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#9CA3AF',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  addressText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111',
+  },
+
+  mapsButton: {
+    backgroundColor: '#007AFF',
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  mapsButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '700',
   },
 
   description: {
