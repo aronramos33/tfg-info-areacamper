@@ -9,13 +9,50 @@ import {
   Platform,
   ScrollView,
   Alert,
+  Modal,
 } from 'react-native';
+import DateTimePicker, {
+  DateTimePickerEvent,
+} from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
 import SignInEmailButton from '@/components/SignInEmailButton';
 import SignInButton from '@/components/SignInButton';
 import { supabase } from '@/lib/supabase';
+import {
+  isValidDNINIE,
+  isValidName,
+  isValidLocalPhone,
+} from '@/components/utils/validation';
 
 type Tab = 'signin' | 'signup';
+
+const GENDER_OPTIONS = [
+  { value: 'male', label: 'Hombre' },
+  { value: 'female', label: 'Mujer' },
+  { value: 'other', label: 'Otro' },
+  { value: 'undisclosed', label: 'No indicar' },
+] as const;
+type GenderValue = (typeof GENDER_OPTIONS)[number]['value'] | '';
+
+const COUNTRY_CODES = [
+  { country: 'España', prefix: '+34', flag: '🇪🇸' },
+  { country: 'Alemania', prefix: '+49', flag: '🇩🇪' },
+  { country: 'Francia', prefix: '+33', flag: '🇫🇷' },
+  { country: 'Italia', prefix: '+39', flag: '🇮🇹' },
+  { country: 'Países Bajos', prefix: '+31', flag: '🇳🇱' },
+  { country: 'Reino Unido', prefix: '+44', flag: '🇬🇧' },
+];
+
+function dateToISO(d: Date): string {
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+function formatDateDisplay(d: Date): string {
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
 
 export default function AuthScreen() {
   const router = useRouter();
@@ -32,20 +69,63 @@ export default function AuthScreen() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [dni, setDni] = useState('');
-  const [phone, setPhone] = useState('');
+  const [phonePrefix, setPhonePrefix] = useState('+34');
+  const [localPhone, setLocalPhone] = useState('');
+  const [showPrefixModal, setShowPrefixModal] = useState(false);
+  const [birthDate, setBirthDate] = useState<Date | null>(null);
+  const [showBirthPicker, setShowBirthPicker] = useState(false);
+  const [gender, setGender] = useState<GenderValue>('');
   const [signUpLoading, setSignUpLoading] = useState(false);
+
+  const maxBirthDate = new Date(
+    new Date().getFullYear() - 18,
+    new Date().getMonth(),
+    new Date().getDate(),
+  );
+
+  const selectedCountry =
+    COUNTRY_CODES.find((c) => c.prefix === phonePrefix) ?? COUNTRY_CODES[0];
 
   const handleSignUp = async () => {
     if (!suEmail.trim() || !suPassword.trim()) {
       Alert.alert('Campos requeridos', 'El email y la contraseña son obligatorios.');
       return;
     }
-    if (!firstName.trim() || !lastName.trim()) {
-      Alert.alert('Campos requeridos', 'El nombre y el apellido son obligatorios.');
+    if (!isValidName(firstName)) {
+      Alert.alert(
+        'Nombre inválido',
+        'El nombre debe tener al menos 2 caracteres y solo puede contener letras.',
+      );
+      return;
+    }
+    if (!isValidName(lastName)) {
+      Alert.alert(
+        'Apellido inválido',
+        'El apellido debe tener al menos 2 caracteres y solo puede contener letras.',
+      );
       return;
     }
     if (!dni.trim()) {
       Alert.alert('Campos requeridos', 'El DNI/NIE es obligatorio.');
+      return;
+    }
+    if (!isValidDNINIE(dni)) {
+      Alert.alert(
+        'DNI/NIE inválido',
+        'Comprueba el formato. DNI: 8 dígitos + letra (ej: 12345678Z). NIE: X/Y/Z + 7 dígitos + letra (ej: X1234567L).',
+      );
+      return;
+    }
+    if (localPhone.trim() && !isValidLocalPhone(localPhone)) {
+      Alert.alert('Teléfono inválido', 'Introduce al menos 6 dígitos en el número.');
+      return;
+    }
+    if (!birthDate) {
+      Alert.alert('Campos requeridos', 'La fecha de nacimiento es obligatoria.');
+      return;
+    }
+    if (!gender) {
+      Alert.alert('Campos requeridos', 'Selecciona un género.');
       return;
     }
     if (suPassword.length < 8) {
@@ -60,6 +140,7 @@ export default function AuthScreen() {
     setSignUpLoading(true);
     try {
       const fullName = `${firstName.trim()} ${lastName.trim()}`;
+      const phone = localPhone.trim() ? `${phonePrefix}${localPhone.trim()}` : null;
       const { data, error } = await supabase.auth.signUp({
         email: suEmail.trim().toLowerCase(),
         password: suPassword,
@@ -73,8 +154,12 @@ export default function AuthScreen() {
             {
               user_id: data.user.id,
               full_name: fullName,
-              dni: dni.trim().toUpperCase() || null,
-              phone: phone.trim() || null,
+              first_name: firstName.trim(),
+              last_name: lastName.trim(),
+              dni: dni.trim().toUpperCase(),
+              phone,
+              birth_date: dateToISO(birthDate),
+              gender,
             },
             { onConflict: 'user_id' },
           );
@@ -201,6 +286,8 @@ export default function AuthScreen() {
             </View>
 
             <Text style={[styles.sectionLabel, { marginTop: 16 }]}>DATOS PERSONALES</Text>
+
+            {/* Nombre + Apellido */}
             <View style={styles.row}>
               <View style={[styles.field, { flex: 1 }]}>
                 <Text style={styles.label}>Nombre *</Text>
@@ -226,6 +313,8 @@ export default function AuthScreen() {
                 />
               </View>
             </View>
+
+            {/* DNI */}
             <View style={styles.field}>
               <Text style={styles.label}>DNI / NIE *</Text>
               <TextInput
@@ -237,17 +326,97 @@ export default function AuthScreen() {
                 placeholderTextColor="#aaa"
               />
             </View>
+
+            {/* Teléfono con prefijo */}
             <View style={styles.field}>
               <Text style={styles.label}>Teléfono (opcional)</Text>
-              <TextInput
-                value={phone}
-                onChangeText={setPhone}
-                placeholder="+34 600 000 000"
-                keyboardType="phone-pad"
-                style={styles.input}
-                placeholderTextColor="#aaa"
-              />
+              <View style={styles.phoneRow}>
+                <Pressable
+                  onPress={() => setShowPrefixModal(true)}
+                  style={styles.prefixBtn}
+                >
+                  <Text style={styles.prefixText}>
+                    {selectedCountry.flag} {selectedCountry.prefix}
+                  </Text>
+                  <Text style={styles.prefixArrow}>▾</Text>
+                </Pressable>
+                <TextInput
+                  value={localPhone}
+                  onChangeText={setLocalPhone}
+                  placeholder="600 000 000"
+                  keyboardType="phone-pad"
+                  style={[styles.input, { flex: 1 }]}
+                  placeholderTextColor="#aaa"
+                />
+              </View>
             </View>
+
+            {/* Fecha de nacimiento */}
+            <View style={styles.field}>
+              <Text style={styles.label}>Fecha de nacimiento *</Text>
+              {Platform.OS === 'ios' ? (
+                <DateTimePicker
+                  value={birthDate ?? new Date()}
+                  mode="date"
+                  display="compact"
+                  maximumDate={maxBirthDate}
+                  onChange={(_: DateTimePickerEvent, date?: Date) => {
+                    if (date) setBirthDate(date);
+                  }}
+                  style={{ alignSelf: 'flex-start', marginTop: 2 }}
+                />
+              ) : (
+                <>
+                  <Pressable
+                    onPress={() => setShowBirthPicker(true)}
+                    style={[styles.input, styles.dateBtn]}
+                  >
+                    <Text style={birthDate ? styles.dateBtnText : styles.dateBtnPlaceholder}>
+                      {birthDate ? formatDateDisplay(birthDate) : 'DD/MM/AAAA'}
+                    </Text>
+                  </Pressable>
+                  {showBirthPicker && (
+                    <DateTimePicker
+                      value={birthDate ?? new Date()}
+                      mode="date"
+                      display="default"
+                      maximumDate={maxBirthDate}
+                      onChange={(_: DateTimePickerEvent, date?: Date) => {
+                        setShowBirthPicker(false);
+                        if (date) setBirthDate(date);
+                      }}
+                    />
+                  )}
+                </>
+              )}
+            </View>
+
+            {/* Género */}
+            <View style={styles.field}>
+              <Text style={styles.label}>Género *</Text>
+              <View style={styles.genderGrid}>
+                {GENDER_OPTIONS.map((opt) => (
+                  <Pressable
+                    key={opt.value}
+                    onPress={() => setGender(opt.value)}
+                    style={[
+                      styles.genderChip,
+                      gender === opt.value && styles.genderChipActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.genderChipText,
+                        gender === opt.value && styles.genderChipTextActive,
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+
             <Text style={[styles.helper, { marginTop: 4 }]}>
               Podrás añadir tus vehículos desde tu perfil tras crear la cuenta.
             </Text>
@@ -275,6 +444,44 @@ export default function AuthScreen() {
           </Text>
         </Pressable>
       </ScrollView>
+
+      {/* Modal selector de prefijo */}
+      <Modal
+        visible={showPrefixModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowPrefixModal(false)}
+      >
+        <Pressable
+          style={styles.prefixOverlay}
+          onPress={() => setShowPrefixModal(false)}
+        >
+          <Pressable
+            style={styles.prefixModal}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text style={styles.prefixModalTitle}>Selecciona el país</Text>
+            {COUNTRY_CODES.map((c) => (
+              <Pressable
+                key={c.prefix}
+                onPress={() => {
+                  setPhonePrefix(c.prefix);
+                  setShowPrefixModal(false);
+                }}
+                style={[
+                  styles.prefixOption,
+                  phonePrefix === c.prefix && styles.prefixOptionActive,
+                ]}
+              >
+                <Text style={styles.prefixOptionLabel}>
+                  {c.flag}  {c.country}
+                </Text>
+                <Text style={styles.prefixOptionCode}>{c.prefix}</Text>
+              </Pressable>
+            ))}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -377,6 +584,67 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#111',
   },
+  phoneRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  prefixBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F7F8FB',
+    borderWidth: 1,
+    borderColor: '#e5e5e5',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.select({ ios: 14, android: 12 }),
+  },
+  prefixText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111',
+  },
+  prefixArrow: {
+    fontSize: 11,
+    color: '#aaa',
+  },
+  dateBtn: {
+    justifyContent: 'center',
+  },
+  dateBtnText: {
+    fontSize: 16,
+    color: '#111',
+  },
+  dateBtnPlaceholder: {
+    fontSize: 16,
+    color: '#aaa',
+  },
+  genderGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  genderChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: '#e5e5e5',
+    backgroundColor: '#F7F8FB',
+  },
+  genderChipActive: {
+    borderColor: '#1a73e8',
+    backgroundColor: '#EAF1FE',
+  },
+  genderChipText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#888',
+  },
+  genderChipTextActive: {
+    color: '#1a73e8',
+  },
   submitBtn: {
     backgroundColor: '#1a73e8',
     borderRadius: 14,
@@ -393,5 +661,54 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#888',
     fontStyle: 'italic',
+  },
+  prefixOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  prefixModal: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 20,
+    width: '100%',
+    maxWidth: 340,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  prefixModalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#111',
+    marginBottom: 14,
+  },
+  prefixOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 13,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  prefixOptionActive: {
+    backgroundColor: '#EAF1FE',
+    marginHorizontal: -8,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  prefixOptionLabel: {
+    fontSize: 16,
+    color: '#111',
+    fontWeight: '500',
+  },
+  prefixOptionCode: {
+    fontSize: 15,
+    color: '#888',
+    fontWeight: '600',
   },
 });

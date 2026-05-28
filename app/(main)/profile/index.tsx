@@ -256,6 +256,42 @@ export default function ProfileIndex() {
     ]);
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Eliminar cuenta',
+      'Se borrarán permanentemente tu perfil, vehículos y datos personales.\n\nLos registros de reservas y pagos se conservarán de forma anónima por obligación legal (GDPR art. 17 + normativa fiscal española).\n\nEsta acción no se puede deshacer.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar mi cuenta',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              '¿Seguro?',
+              'Confirma que quieres eliminar tu cuenta de forma permanente.',
+              [
+                { text: 'No, conservar cuenta', style: 'cancel' },
+                {
+                  text: 'Sí, eliminar',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      const { error } = await supabase.functions.invoke('delete-account');
+                      if (error) throw error;
+                      await signOut();
+                    } catch (e: any) {
+                      Alert.alert('Error', e?.message ?? 'No se pudo eliminar la cuenta. Inténtalo de nuevo.');
+                    }
+                  },
+                },
+              ],
+            );
+          },
+        },
+      ],
+    );
+  };
+
   const vehicleSubtitle =
     vehicleCount === null
       ? '—'
@@ -402,6 +438,13 @@ export default function ProfileIndex() {
           Versión {Constants.expoConfig?.version ?? '—'}
         </Text>
 
+        {/* ── Eliminar cuenta (solo usuarios, no admin) ── */}
+        {!isAdmin && (
+          <Pressable onPress={handleDeleteAccount} style={styles.deleteAccountLink}>
+            <Text style={styles.deleteAccountText}>Eliminar cuenta</Text>
+          </Pressable>
+        )}
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -504,5 +547,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#c7c7cc',
     marginTop: 28,
+  },
+  deleteAccountLink: {
+    alignItems: 'center',
+    paddingVertical: 10,
+    marginTop: 4,
+  },
+  deleteAccountText: {
+    fontSize: 12,
+    color: '#c7c7cc',
+    textDecorationLine: 'underline',
   },
 });

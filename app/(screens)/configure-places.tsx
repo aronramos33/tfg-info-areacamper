@@ -8,7 +8,11 @@ import {
   Alert,
   ActivityIndicator,
   Switch,
+  Platform,
 } from 'react-native';
+import DateTimePicker, {
+  DateTimePickerEvent,
+} from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
@@ -19,6 +23,7 @@ import {
   PlaceConfig,
   emptyGuest,
 } from '@/providers/PendingReservationContext';
+import { validateDoc } from '@/components/utils/validation';
 import {
   Vehicle,
   isValidLengthMeters,
@@ -67,6 +72,19 @@ function emptyLocal(): LocalPlaceState {
   };
 }
 
+function parseBirthDate(s: string): Date {
+  if (!s) return new Date();
+  const [dd, mm, yyyy] = s.split('/').map(Number);
+  const d = new Date(yyyy, mm - 1, dd);
+  return isNaN(d.getTime()) ? new Date() : d;
+}
+
+function dateToBirthString(d: Date): string {
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
 function configToLocal(cfg: PlaceConfig): LocalPlaceState {
   const local = emptyLocal();
   local.numGuests = cfg.numGuests ?? 1;
@@ -94,6 +112,7 @@ export default function ConfigurePlacesScreen() {
   const [loading, setLoading] = useState(true);
   const [placeStates, setPlaceStates] = useState<LocalPlaceState[]>([]);
   const [activePlaza, setActivePlaza] = useState(0);
+  const [showBirthPicker, setShowBirthPicker] = useState<{ plaza: number; guest: number } | null>(null);
   const profileApplied = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -245,6 +264,11 @@ export default function ConfigurePlacesScreen() {
           setActivePlaza(i);
           return;
         }
+        if (!isValidSpanishPlate(s.companionVehicle.plate)) {
+          Alert.alert('Matrícula inválida', `Plaza ${i + 1}: formato esperado: 1234ABC.`);
+          setActivePlaza(i);
+          return;
+        }
       }
 
       // Guest validation
@@ -256,23 +280,14 @@ export default function ConfigurePlacesScreen() {
           Alert.alert('Nombre requerido', `${label}: indica el nombre completo.`);
           setActivePlaza(i); return;
         }
-        if (!g.doc_number.trim()) {
-          Alert.alert('Documento requerido', `${label}: indica el nº de documento.`);
+        const docErr = validateDoc(g.doc_type, g.doc_number);
+        if (docErr) {
+          Alert.alert('Documento inválido', `${label}: ${docErr}`);
           setActivePlaza(i); return;
         }
         // Validar fecha DD/MM/AAAA
         if (!g.birth_date.trim()) {
           Alert.alert('Fecha requerida', `${label}: indica la fecha de nacimiento.`);
-          setActivePlaza(i); return;
-        }
-        const dateOk = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.test(g.birth_date.trim());
-        if (!dateOk) {
-          Alert.alert('Formato de fecha', `${label}: usa el formato DD/MM/AAAA (ej. 15/06/1990).`);
-          setActivePlaza(i); return;
-        }
-        const [dd, mm, yyyy] = g.birth_date.trim().split('/').map(Number);
-        if (mm < 1 || mm > 12 || dd < 1 || dd > 31 || yyyy < 1900 || yyyy > new Date().getFullYear()) {
-          Alert.alert('Fecha inválida', `${label}: comprueba que la fecha de nacimiento es correcta.`);
           setActivePlaza(i); return;
         }
         // Email básico (si se rellena)
@@ -586,14 +601,42 @@ export default function ConfigurePlacesScreen() {
               />
 
               {/* Fecha de nacimiento */}
-              <Text style={fieldLabel}>Fecha de nacimiento * (DD/MM/AAAA)</Text>
-              <TextInput
-                value={g.birth_date}
-                onChangeText={v => updateGuest(activePlaza, gi, 'birth_date', v)}
-                placeholder="DD/MM/AAAA"
-                keyboardType="numbers-and-punctuation"
-                style={input}
-              />
+              <Text style={fieldLabel}>Fecha de nacimiento *</Text>
+              {Platform.OS === 'ios' ? (
+                <DateTimePicker
+                  value={parseBirthDate(g.birth_date)}
+                  mode="date"
+                  display="compact"
+                  maximumDate={new Date()}
+                  onChange={(_: DateTimePickerEvent, date?: Date) => {
+                    if (date) updateGuest(activePlaza, gi, 'birth_date', dateToBirthString(date));
+                  }}
+                  style={{ alignSelf: 'flex-start', marginBottom: 4 }}
+                />
+              ) : (
+                <>
+                  <Pressable
+                    onPress={() => setShowBirthPicker({ plaza: activePlaza, guest: gi })}
+                    style={[input, { justifyContent: 'center' }]}
+                  >
+                    <Text style={{ fontSize: 14, color: g.birth_date ? '#111' : '#aaa' }}>
+                      {g.birth_date || 'Seleccionar fecha'}
+                    </Text>
+                  </Pressable>
+                  {showBirthPicker?.plaza === activePlaza && showBirthPicker?.guest === gi && (
+                    <DateTimePicker
+                      value={parseBirthDate(g.birth_date)}
+                      mode="date"
+                      display="default"
+                      maximumDate={new Date()}
+                      onChange={(_: DateTimePickerEvent, date?: Date) => {
+                        setShowBirthPicker(null);
+                        if (date) updateGuest(activePlaza, gi, 'birth_date', dateToBirthString(date));
+                      }}
+                    />
+                  )}
+                </>
+              )}
 
               {/* Género */}
               <Text style={fieldLabel}>Género</Text>

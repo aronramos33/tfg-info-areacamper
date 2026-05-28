@@ -353,7 +353,7 @@ export default function ProfileEdit() {
                     {showDatePicker && (
                       <View>
                         <DateTimePicker
-                          value={birthDate ?? new Date(1990, 0, 1)}
+                          value={birthDate ?? new Date()}
                           mode="date"
                           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                           maximumDate={new Date()}

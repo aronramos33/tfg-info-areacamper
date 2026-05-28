@@ -18,6 +18,7 @@ import { useAuth } from '@/providers/AuthProvider';
 import RequireAuthCard from '@/components/RequireAuthCard';
 import { nightsBetween } from '@/components/utils/dates';
 import { formatCents, NIGHTLY_CENTS } from '@/components/utils/money';
+import { isValidDNINIE } from '@/components/utils/validation';
 import {
   Vehicle,
   isValidLengthMeters,
@@ -305,6 +306,13 @@ export default function CheckoutScreen() {
       Alert.alert(
         'Perfil incompleto',
         'Completa tu nombre, DNI y teléfono antes de reservar.',
+      );
+      return;
+    }
+    if (!isValidDNINIE(dniToUse)) {
+      Alert.alert(
+        'DNI/NIE inválido',
+        'Comprueba el formato del documento. DNI: 8 dígitos + letra (ej: 12345678Z). NIE: X/Y/Z + 7 dígitos + letra (ej: X1234567L).',
       );
       return;
     }
