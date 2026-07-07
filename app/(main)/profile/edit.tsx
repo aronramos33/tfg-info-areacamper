@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -17,6 +16,9 @@ import { useNavigation } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/providers/AuthProvider';
 import { supabase } from '@/lib/supabase';
+import { Ionicons } from '@expo/vector-icons';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
+import { AppAlert } from '@/components/AppAlert';
 
 // ── Helpers de texto ─────────────────────────────────────────────────────────
 
@@ -164,7 +166,7 @@ export default function ProfileEdit() {
     const unsub = navigation.addListener('beforeRemove', (e: any) => {
       if (!isEditingRef.current) return;
       e.preventDefault();
-      Alert.alert('Cambios sin guardar', 'Tienes cambios sin guardar.', [
+      AppAlert.alert('Cambios sin guardar', 'Tienes cambios sin guardar.', [
         { text: 'Seguir editando', style: 'cancel' },
         { text: 'Descartar', style: 'destructive', onPress: () => navigation.dispatch(e.data.action) },
       ]);
@@ -221,15 +223,15 @@ export default function ProfileEdit() {
     setFirstName(f); setLastName(l); setDni(d); setPhone(p);
 
     if (f && f.length < 2) {
-      Alert.alert('Nombre inválido', 'El nombre es demasiado corto.');
+      AppAlert.alert('Nombre inválido', 'El nombre es demasiado corto.');
       return;
     }
     if (!isValidDNINIE(d)) {
-      Alert.alert('DNI/NIE inválido', 'Revisa el formato y la letra.');
+      AppAlert.alert('DNI/NIE inválido', 'Revisa el formato y la letra.');
       return;
     }
     if (!isValidSpanishPhone(p)) {
-      Alert.alert('Teléfono inválido', 'Introduce un teléfono español válido.');
+      AppAlert.alert('Teléfono inválido', 'Introduce un teléfono español válido.');
       return;
     }
 
@@ -259,9 +261,9 @@ export default function ProfileEdit() {
         gender: gender ?? null,
       };
       setIsEditing(false);
-      Alert.alert('Guardado', 'Tus datos se han actualizado.');
+      AppAlert.alert('Guardado', 'Tus datos se han actualizado.');
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'No se pudo guardar el perfil.');
+      AppAlert.alert('Error', e?.message ?? 'No se pudo guardar el perfil.');
     } finally {
       setSaving(false);
     }
@@ -294,7 +296,7 @@ export default function ProfileEdit() {
           <View style={[styles.headerSide, styles.headerSideRight]}>
             {!loading && !isEditing && (
               <Pressable onPress={() => setIsEditing(true)} hitSlop={8} style={styles.pencilBtn}>
-                <Text style={styles.pencilText}>✏️</Text>
+                <Ionicons name="create-outline" size={20} color={colors.secondary} />
               </Pressable>
             )}
           </View>
@@ -303,8 +305,8 @@ export default function ProfileEdit() {
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           {loading ? (
             <View style={styles.loadingRow}>
-              <ActivityIndicator />
-              <Text style={{ marginLeft: 10 }}>Cargando datos…</Text>
+              <ActivityIndicator color={colors.primary} />
+              <Text style={[typography.bodyMd, { marginLeft: 10 }]}>Cargando datos…</Text>
             </View>
           ) : (
             <>
@@ -319,34 +321,32 @@ export default function ProfileEdit() {
               <View style={styles.card}>
                 {isEditing ? (
                   <>
-                    {/* Email — solo lectura siempre */}
                     <Text style={styles.fieldLabel}>Correo electrónico</Text>
-                    <Text style={[styles.fieldValue, { color: '#888' }]}>{email}</Text>
+                    <Text style={[styles.fieldValue, { color: colors.onSurfaceVariant }]}>{email}</Text>
                     <View style={styles.divider} />
 
                     <Text style={styles.fieldLabel}>Nombre</Text>
-                    <TextInput value={firstName} onChangeText={setFirstName} placeholder="Nombre" style={styles.input} autoCapitalize="words" />
+                    <TextInput value={firstName} onChangeText={setFirstName} placeholder="Nombre" style={styles.input} autoCapitalize="words" placeholderTextColor={colors.onSurfaceVariant} />
                     <View style={styles.divider} />
 
                     <Text style={styles.fieldLabel}>Apellidos</Text>
-                    <TextInput value={lastName} onChangeText={setLastName} placeholder="Apellidos" style={styles.input} autoCapitalize="words" />
+                    <TextInput value={lastName} onChangeText={setLastName} placeholder="Apellidos" style={styles.input} autoCapitalize="words" placeholderTextColor={colors.onSurfaceVariant} />
                     <View style={styles.divider} />
 
                     <Text style={styles.fieldLabel}>DNI / NIE</Text>
-                    <TextInput value={dni} onChangeText={setDni} placeholder="12345678Z" style={styles.input} autoCapitalize="characters" />
+                    <TextInput value={dni} onChangeText={setDni} placeholder="12345678Z" style={styles.input} autoCapitalize="characters" placeholderTextColor={colors.onSurfaceVariant} />
                     <View style={styles.divider} />
 
                     <Text style={styles.fieldLabel}>Teléfono</Text>
-                    <TextInput value={phone} onChangeText={setPhone} placeholder="+34 600 000 000" style={styles.input} keyboardType="phone-pad" />
+                    <TextInput value={phone} onChangeText={setPhone} placeholder="+34 600 000 000" style={styles.input} keyboardType="phone-pad" placeholderTextColor={colors.onSurfaceVariant} />
                     <View style={styles.divider} />
 
-                    {/* Fecha de nacimiento */}
                     <Text style={styles.fieldLabel}>Fecha de nacimiento</Text>
                     <Pressable
                       onPress={() => setShowDatePicker(true)}
                       style={styles.input}
                     >
-                      <Text style={birthDate ? { color: '#111', fontSize: 16 } : styles.inputPlaceholder}>
+                      <Text style={birthDate ? styles.fieldValue : styles.inputPlaceholder}>
                         {birthDate ? formatDateDisplay(birthDate) : 'Selecciona tu fecha de nacimiento'}
                       </Text>
                     </Pressable>
@@ -372,7 +372,6 @@ export default function ProfileEdit() {
                     )}
                     <View style={styles.divider} />
 
-                    {/* Género */}
                     <Text style={styles.fieldLabel}>Género</Text>
                     <View style={styles.genderGrid}>
                       {GENDER_OPTIONS.map((opt) => (
@@ -434,74 +433,75 @@ export default function ProfileEdit() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f2f2f7' },
+  safe: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
     paddingVertical: 12,
-    backgroundColor: '#fff',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e0e0e0',
+    backgroundColor: colors.background,
   },
   headerSide: { width: 70 },
   headerSideRight: { alignItems: 'flex-end' },
-  headerBack: { color: '#007AFF', fontSize: 16 },
-  headerTitle: { fontSize: 17, fontWeight: '600', color: '#111' },
+  headerBack: { ...typography.titleMd, color: colors.secondary },
+  headerTitle: { ...typography.titleLg },
   pencilBtn: {
-    width: 34, height: 34, borderRadius: 10,
-    backgroundColor: '#eaeaea', alignItems: 'center', justifyContent: 'center',
+    width: 34, height: 34, borderRadius: radii.sm,
+    backgroundColor: colors.surfaceContainerHigh, alignItems: 'center', justifyContent: 'center',
   },
-  pencilText: { fontSize: 16 },
-  container: { padding: 20, paddingBottom: 40, gap: 16 },
+  container: { padding: spacing.lg, paddingBottom: 40, gap: 16 },
   loadingRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 20 },
-  card: { backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 16, overflow: 'hidden' },
-  fieldLabel: {
-    fontSize: 12, fontWeight: '600', color: '#888',
-    marginTop: 14, textTransform: 'uppercase', letterSpacing: 0.4,
+  card: {
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.lg,
+    paddingHorizontal: spacing.lg,
+    overflow: 'hidden',
+    ...shadow.sm,
   },
+  fieldLabel: { ...typography.labelSm, marginTop: 14 },
   fieldValue: {
-    fontSize: 16, color: '#111',
+    ...typography.bodyLg,
     paddingVertical: Platform.select({ ios: 10, android: 8 }),
   },
-  fieldMissing: { color: '#FF9500', fontStyle: 'italic' },
+  fieldMissing: { color: colors.warning, fontStyle: 'italic' },
   incompleteBanner: {
-    backgroundColor: '#FFF3E0', borderRadius: 10,
+    backgroundColor: colors.warningContainer, borderRadius: radii.sm,
     paddingHorizontal: 14, paddingVertical: 10,
-    borderLeftWidth: 3, borderLeftColor: '#FF9500',
+    borderLeftWidth: 3, borderLeftColor: colors.warning,
   },
-  incompleteBannerText: { fontSize: 14, color: '#8a5700', lineHeight: 20 },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: '#e0e0e0', marginTop: 4 },
+  incompleteBannerText: { ...typography.bodyMd, color: colors.warningText, lineHeight: 20 },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.outlineVariant, marginTop: 4 },
   input: {
-    fontSize: 16,
+    ...typography.bodyLg,
     paddingVertical: Platform.select({ ios: 10, android: 8 }),
-    color: '#111',
+    color: colors.onSurface,
   },
-  inputPlaceholder: { fontSize: 16, color: '#aaa', fontStyle: 'italic' },
+  inputPlaceholder: { ...typography.bodyLg, color: colors.onSurfaceVariant, fontStyle: 'italic' },
   datePickerDone: {
     alignSelf: 'flex-end', paddingHorizontal: 16, paddingVertical: 8,
   },
-  datePickerDoneText: { color: '#007AFF', fontSize: 16, fontWeight: '600' },
+  datePickerDoneText: { ...typography.titleSm, color: colors.secondary },
   genderGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingVertical: 10 },
   genderChip: {
     paddingHorizontal: 14, paddingVertical: 8,
-    borderRadius: 20, borderWidth: 1.5, borderColor: '#ddd',
-    backgroundColor: '#f9f9f9',
+    borderRadius: radii.full, borderWidth: 1.5, borderColor: colors.outline,
+    backgroundColor: colors.surfaceContainerHigh,
   },
-  genderChipSelected: { borderColor: '#007AFF', backgroundColor: '#EAF2FF' },
-  genderChipText: { fontSize: 14, color: '#555' },
-  genderChipTextSelected: { color: '#007AFF', fontWeight: '600' },
+  genderChipSelected: { borderColor: colors.primary, backgroundColor: colors.confirmedBg },
+  genderChipText: { ...typography.titleSm, color: colors.onSurfaceVariant },
+  genderChipTextSelected: { color: colors.primary },
   editActions: { flexDirection: 'row', gap: 12 },
   cancelBtn: {
-    flex: 1, borderRadius: 12, paddingVertical: 15,
-    alignItems: 'center', backgroundColor: '#e5e5ea',
+    flex: 1, borderRadius: radii.md, paddingVertical: 15,
+    alignItems: 'center', backgroundColor: colors.inputSurface,
+    borderWidth: 1, borderColor: colors.outline,
   },
-  cancelBtnText: { color: '#111', fontSize: 16, fontWeight: '600' },
+  cancelBtnText: { ...typography.titleMd },
   saveBtn: {
-    flex: 1, backgroundColor: '#007AFF', borderRadius: 12,
-    paddingVertical: 15, alignItems: 'center',
+    flex: 1, backgroundColor: colors.primary, borderRadius: radii.md,
+    paddingVertical: 15, alignItems: 'center', ...shadow.sm,
   },
-  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  saveBtnText: { ...typography.titleMd, color: colors.onPrimary },
 });

@@ -40,3 +40,9 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+
+# Claude Code (local AI assistant config — never commit)
+.claude/
+
+# Temp files
+*temp_docx_output.txt

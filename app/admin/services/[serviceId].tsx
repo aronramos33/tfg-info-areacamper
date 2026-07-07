@@ -9,13 +9,15 @@ import {
   Image,
   TextInput,
   Pressable,
-  Alert,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../../lib/supabase';
+import { AppAlert } from '../../../components/AppAlert';
 import { pickImage, uploadServiceImage } from '../../../lib/uploadServiceImage';
+import { Ionicons } from '@expo/vector-icons';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
 
 type Service = {
   id: string;
@@ -39,7 +41,6 @@ export default function AdminServiceDetail() {
   const [toggling, setToggling] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // Campos editables
   const [name, setName] = useState('');
   const [shortDesc, setShortDesc] = useState('');
   const [longDesc, setLongDesc] = useState('');
@@ -95,7 +96,7 @@ export default function AdminServiceDetail() {
   const handleSave = async () => {
     if (!service) return;
     if (!name.trim() || !shortDesc.trim() || !longDesc.trim()) {
-      Alert.alert(
+      AppAlert.alert(
         'Campos obligatorios',
         'Nombre, descripción corta y larga son obligatorios.',
       );
@@ -122,7 +123,7 @@ export default function AdminServiceDetail() {
       await load();
       setIsEditing(false);
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'No se pudo guardar.');
+      AppAlert.alert('Error', e?.message ?? 'No se pudo guardar.');
     } finally {
       setSaving(false);
     }
@@ -131,7 +132,7 @@ export default function AdminServiceDetail() {
   const handleToggleActive = async () => {
     if (!service) return;
     const next = !service.is_active;
-    Alert.alert(
+    AppAlert.alert(
       next ? 'Activar servicio' : 'Desactivar servicio',
       next
         ? '¿Quieres activar este servicio? Será visible para los usuarios.'
@@ -151,7 +152,7 @@ export default function AdminServiceDetail() {
               if (error) throw error;
               await load();
             } catch (e: any) {
-              Alert.alert(
+              AppAlert.alert(
                 'Error',
                 e?.message ?? 'No se pudo cambiar el estado.',
               );
@@ -166,7 +167,7 @@ export default function AdminServiceDetail() {
 
   const handleDelete = () => {
     if (!service) return;
-    Alert.alert(
+    AppAlert.alert(
       'Eliminar servicio',
       `¿Estás seguro de que quieres eliminar "${service.name_es}"? Esta acción no se puede deshacer.`,
       [
@@ -184,7 +185,7 @@ export default function AdminServiceDetail() {
               if (error) throw error;
               router.back();
             } catch (e: any) {
-              Alert.alert('Error', e?.message ?? 'No se pudo eliminar.');
+              AppAlert.alert('Error', e?.message ?? 'No se pudo eliminar.');
               setDeleting(false);
             }
           },
@@ -208,7 +209,7 @@ export default function AdminServiceDetail() {
       onDiscard();
       return;
     }
-    Alert.alert(
+    AppAlert.alert(
       'Cambios sin guardar',
       '¿Quieres descartar los cambios?',
       [
@@ -221,7 +222,7 @@ export default function AdminServiceDetail() {
   if (loading) {
     return (
       <SafeAreaView style={styles.center}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
@@ -229,13 +230,13 @@ export default function AdminServiceDetail() {
   if (!service) {
     return (
       <SafeAreaView style={styles.center}>
-        <Text>No se ha encontrado este servicio.</Text>
+        <Text style={typography.bodyMd}>No se ha encontrado este servicio.</Text>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F7F8FB' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.select({ ios: 'padding', android: undefined })}
@@ -267,7 +268,7 @@ export default function AdminServiceDetail() {
               }
               style={styles.editBtn}
             >
-              <Text style={styles.editBtnText}>{isEditing ? '✕' : '✏️'}</Text>
+              <Ionicons name={isEditing ? 'close' : 'create-outline'} size={20} color={colors.secondary} />
             </Pressable>
           </View>
 
@@ -294,7 +295,7 @@ export default function AdminServiceDetail() {
                     onPress={handleClearImage}
                     style={styles.imageClearBtn}
                   >
-                    <Text style={styles.imageClearBtnText}>✕</Text>
+                    <Ionicons name="close" size={16} color={colors.onPrimary} />
                   </Pressable>
                 </>
               ) : (
@@ -302,9 +303,8 @@ export default function AdminServiceDetail() {
                   onPress={handlePickImage}
                   style={[styles.imagePlaceholder, { flex: 1 }]}
                 >
-                  <Text style={styles.imageAddText}>
-                    📷 Toca para añadir imagen
-                  </Text>
+                  <Ionicons name="camera-outline" size={28} color={colors.onSurfaceVariant} />
+                  <Text style={styles.imageAddText}>Toca para añadir imagen</Text>
                 </Pressable>
               )}
             </View>
@@ -312,7 +312,7 @@ export default function AdminServiceDetail() {
             <Image source={{ uri: service.image_url }} style={styles.image} />
           ) : (
             <View style={[styles.image, styles.imagePlaceholder]}>
-              <Text style={{ color: '#aaa' }}>Sin imagen</Text>
+              <Text style={typography.bodyMd}>Sin imagen</Text>
             </View>
           )}
 
@@ -405,7 +405,6 @@ export default function AdminServiceDetail() {
               </Text>
             )}
 
-
             {/* Botones guardar/cancelar en modo edición */}
             {isEditing && (
               <View style={styles.editButtons}>
@@ -421,7 +420,7 @@ export default function AdminServiceDetail() {
                   style={[styles.btnSave, saving && { opacity: 0.6 }]}
                 >
                   {saving ? (
-                    <ActivityIndicator color="white" />
+                    <ActivityIndicator color={colors.onPrimary} />
                   ) : (
                     <Text style={styles.btnSaveText}>Guardar cambios</Text>
                   )}
@@ -442,13 +441,20 @@ export default function AdminServiceDetail() {
                   toggling && { opacity: 0.6 },
                 ]}
               >
-                <Text style={styles.btnToggleText}>
-                  {toggling
-                    ? 'Cambiando…'
-                    : service.is_active
-                      ? '⏸ Desactivar servicio'
-                      : '▶ Activar servicio'}
-                </Text>
+                {toggling ? (
+                  <ActivityIndicator color={service.is_active ? colors.warningText : colors.confirmedText} />
+                ) : (
+                  <View style={styles.btnContent}>
+                    <Ionicons
+                      name={service.is_active ? 'pause-circle-outline' : 'play-circle-outline'}
+                      size={24}
+                      color={service.is_active ? colors.warningText : colors.confirmedText}
+                    />
+                    <Text style={[styles.btnToggleText, service.is_active ? { color: colors.warningText } : { color: colors.confirmedText }]}>
+                      {service.is_active ? 'Desactivar servicio' : 'Activar servicio'}
+                    </Text>
+                  </View>
+                )}
               </Pressable>
 
               <Pressable
@@ -456,9 +462,14 @@ export default function AdminServiceDetail() {
                 disabled={deleting}
                 style={[styles.btnDelete, deleting && { opacity: 0.6 }]}
               >
-                <Text style={styles.btnDeleteText}>
-                  {deleting ? 'Eliminando…' : '🗑 Eliminar servicio'}
-                </Text>
+                {deleting ? (
+                  <ActivityIndicator color={colors.error} />
+                ) : (
+                  <View style={styles.btnContent}>
+                    <Ionicons name="trash-outline" size={24} color={colors.error} />
+                    <Text style={styles.btnDeleteText}>Eliminar servicio</Text>
+                  </View>
+                )}
               </Pressable>
             </View>
           )}
@@ -469,7 +480,7 @@ export default function AdminServiceDetail() {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background },
 
   container: { paddingBottom: 48 },
 
@@ -477,32 +488,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
     paddingVertical: 12,
   },
   backBtn: { width: 70 },
-  backText: { color: '#007AFF', fontSize: 16, fontWeight: '600' },
-  pageTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111',
-  },
+  backText: { ...typography.titleMd, color: colors.secondary },
+  pageTitle: { flex: 1, textAlign: 'center', ...typography.titleLg },
   editBtn: {
     width: 36,
     height: 36,
-    borderRadius: 10,
-    backgroundColor: '#eaeaea',
+    borderRadius: radii.sm,
+    backgroundColor: colors.surfaceContainerHigh,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  editBtnText: { fontSize: 16 },
 
   image: {
     width: '100%',
     height: 220,
-    backgroundColor: '#eee',
+    backgroundColor: colors.surfaceContainerHigh,
     overflow: 'hidden',
   },
   imagePlaceholder: { justifyContent: 'center', alignItems: 'center' },
@@ -513,136 +517,125 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: colors.overlay,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  imageClearBtnText: { color: 'white', fontSize: 14, fontWeight: '700' },
 
   imageEditOverlay: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: colors.overlay,
     paddingVertical: 10,
     alignItems: 'center',
   },
-  imageEditOverlayText: { color: 'white', fontWeight: '700', fontSize: 14 },
-  imageAddText: { color: '#888', fontSize: 14, fontWeight: '600' },
+  imageEditOverlayText: { color: colors.onPrimary, fontFamily: 'PlusJakartaSans_700Bold', fontSize: 14 },
+  imageAddText: { ...typography.bodyMd, marginTop: 8 },
 
   card: {
-    marginHorizontal: 16,
-    marginTop: 16,
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.lg,
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    ...shadow.sm,
     gap: 4,
   },
 
-  fieldLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#888',
-    marginTop: 12,
-  },
-  fieldValue: {
-    fontSize: 15,
-    color: '#111',
-    marginTop: 4,
-    lineHeight: 22,
-  },
+  fieldLabel: { ...typography.labelMd, marginTop: 12 },
+  fieldValue: { ...typography.bodyLg, marginTop: 4, lineHeight: 22 },
 
   input: {
-    backgroundColor: '#F7F8FB',
+    backgroundColor: colors.inputSurface,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
+    borderColor: colors.outline,
+    borderRadius: radii.sm,
     paddingHorizontal: 12,
     paddingVertical: Platform.select({ ios: 12, android: 10 }),
-    fontSize: 15,
-    color: '#111',
+    ...typography.bodyLg,
+    color: colors.onSurface,
     marginTop: 4,
   },
   inputMultiline: {
-    backgroundColor: '#F7F8FB',
+    backgroundColor: colors.inputSurface,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
+    borderColor: colors.outline,
+    borderRadius: radii.sm,
     paddingHorizontal: 12,
     paddingTop: 12,
-    fontSize: 15,
-    color: '#111',
+    ...typography.bodyLg,
+    color: colors.onSurface,
     minHeight: 120,
     marginTop: 4,
   },
 
   toggleRow: {
     flexDirection: 'row',
-    backgroundColor: '#e8eaf0',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceContainerHigh,
+    borderRadius: radii.md,
     padding: 4,
     marginTop: 6,
   },
   toggleBtn: {
     flex: 1,
     paddingVertical: 10,
-    borderRadius: 10,
+    borderRadius: radii.sm,
     alignItems: 'center',
   },
   toggleBtnActive: {
-    backgroundColor: 'white',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 2,
+    backgroundColor: colors.surfaceContainerLow,
+    ...shadow.sm,
   },
-  toggleText: { fontSize: 13, fontWeight: '600', color: '#888' },
-  toggleTextActive: { color: '#007AFF' },
+  toggleText: { ...typography.titleSm, color: colors.onSurfaceVariant },
+  toggleTextActive: { color: colors.secondary },
 
   editButtons: { flexDirection: 'row', gap: 10, marginTop: 16 },
   btnSave: {
     flex: 1,
-    backgroundColor: '#007AFF',
+    backgroundColor: colors.primary,
     paddingVertical: 12,
-    borderRadius: 10,
+    borderRadius: radii.sm,
     alignItems: 'center',
+    ...shadow.sm,
   },
-  btnSaveText: { color: 'white', fontWeight: '700', fontSize: 14 },
+  btnSaveText: { ...typography.titleSm, color: colors.onPrimary },
   btnCancel: {
     flex: 1,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: colors.surfaceContainerHigh,
     paddingVertical: 12,
-    borderRadius: 10,
+    borderRadius: radii.sm,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.outline,
   },
-  btnCancelText: { color: '#333', fontWeight: '700', fontSize: 14 },
+  btnCancelText: { ...typography.titleSm },
 
   actionsCard: {
-    marginHorizontal: 16,
+    marginHorizontal: spacing.lg,
     marginTop: 14,
+    gap: 10,
+  },
+  btnContent: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
     gap: 10,
   },
   btnToggle: {
     paddingVertical: 14,
-    borderRadius: 14,
+    borderRadius: radii.md,
     alignItems: 'center',
   },
-  btnActivate: { backgroundColor: '#e8f5e9' },
-  btnDeactivate: { backgroundColor: '#fff3e0' },
-  btnToggleText: { fontWeight: '700', fontSize: 15, color: '#333' },
+  btnActivate: { backgroundColor: colors.confirmedBg },
+  btnDeactivate: { backgroundColor: colors.warningContainer },
+  btnToggleText: { ...typography.titleSm, lineHeight: 24 },
 
   btnDelete: {
     paddingVertical: 14,
-    borderRadius: 14,
+    borderRadius: radii.md,
     alignItems: 'center',
-    backgroundColor: '#ffebee',
+    backgroundColor: colors.errorContainer,
   },
-  btnDeleteText: { fontWeight: '700', fontSize: 15, color: '#c62828' },
+  btnDeleteText: { ...typography.titleSm, color: colors.error, lineHeight: 24 },
 });

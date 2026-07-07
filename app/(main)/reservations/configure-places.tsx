@@ -5,11 +5,11 @@ import {
   ScrollView,
   TextInput,
   Pressable,
-  Alert,
   ActivityIndicator,
   Switch,
   Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, {
   DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
@@ -26,13 +26,60 @@ import {
 import { validateDoc } from '@/components/utils/validation';
 import {
   Vehicle,
-  isValidLengthMeters,
   isValidSpanishPlate,
   normalizePlate,
-  parseLengthMeters,
   vehicleDisplayName,
 } from '@/components/utils/vehicle';
 import { formatCents } from '@/components/utils/money';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
+import StepProgress from '@/components/StepProgress';
+import { AppAlert } from '@/components/AppAlert';
+
+const PHONE_PREFIXES = [
+  { flag: '🇪🇸', code: '+34', label: 'España' },
+  { flag: '🇩🇪', code: '+49', label: 'Alemania' },
+  { flag: '🇮🇹', code: '+39', label: 'Italia' },
+  { flag: '🇬🇧', code: '+44', label: 'Reino Unido' },
+  { flag: '🇨🇭', code: '+41', label: 'Suiza' },
+  { flag: '🇫🇷', code: '+33', label: 'Francia' },
+] as const;
+
+function parsePhone(value: string): { prefix: string; digits: string } {
+  for (const p of PHONE_PREFIXES) {
+    if (value.startsWith(p.code)) {
+      return { prefix: p.code, digits: value.slice(p.code.length).trimStart() };
+    }
+  }
+  return { prefix: '+34', digits: value };
+}
+
+function isoToBirthDate(iso: string): string {
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function profileGenderToGuest(g: string | null): GuestDraft['gender'] {
+  if (g === 'male') return 'm';
+  if (g === 'female') return 'f';
+  if (g === 'other') return 'other';
+  return '';
+}
+
+function isAdult(birthDate: string): boolean {
+  const m = birthDate.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return false;
+  const birth = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  if (isNaN(birth.getTime())) return false;
+  const cutoff = new Date();
+  cutoff.setFullYear(cutoff.getFullYear() - 18);
+  return birth <= cutoff;
+}
+
+function maxBirthDate(): Date {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 18);
+  return d;
+}
 
 type Extra = {
   id: number;
@@ -43,12 +90,10 @@ type Extra = {
 };
 
 type LocalPlaceState = {
-  // Plaza 0 (usuario): vehículo guardado en la BD
   selectedVehicleId: number | null;
   showNewVehicleForm: boolean;
   newVehicle: { brand: string; model: string; plate: string; alias: string };
   savingVehicle: boolean;
-  // Plaza 1+ (acompañante): vehículo escrito sin guardar en BD
   companionVehicle: { brand: string; model: string; plate: string; alias: string };
   companionVehicleConfirmed: boolean;
   numGuests: number;
@@ -121,10 +166,12 @@ export default function ConfigurePlacesScreen() {
   useEffect(() => {
     if (!session?.user?.id) return;
     async function load() {
-      const [vehiclesRes, extrasRes] = await Promise.all([
+      const [vehiclesRes, extrasRes, profileRes] = await Promise.all([
         supabase.from('vehicles').select('*').eq('user_id', session!.user.id).order('created_at', { ascending: true }),
         supabase.from('extras').select('id,code,name_es,unit_amount_cents,pricing_type').eq('is_active', true),
+        supabase.from('user_profiles').select('birth_date, gender').eq('user_id', session!.user.id).maybeSingle(),
       ]);
+      const profileExtras = profileRes.data as { birth_date: string | null; gender: string | null } | null;
 
       const vList = (vehiclesRes.data ?? []) as Vehicle[];
       setVehicles(vList);
@@ -142,13 +189,16 @@ export default function ConfigurePlacesScreen() {
         return local;
       });
 
-      // Pre-fill plaza 1, acompañante 1 from profile
       if (!profileApplied.current && profile && states[0].guests[0].full_name === '') {
         profileApplied.current = true;
         states[0].guests[0] = {
           ...emptyGuest(),
           full_name: profile.full_name ?? '',
           doc_number: profile.dni ?? '',
+          phone: profile.phone ?? '',
+          email: session?.user?.email ?? '',
+          birth_date: profileExtras?.birth_date ? isoToBirthDate(profileExtras.birth_date) : '',
+          gender: profileGenderToGuest(profileExtras?.gender ?? null),
         };
       }
 
@@ -199,7 +249,7 @@ export default function ConfigurePlacesScreen() {
 
   const removePlaza = (idx: number) => {
     if (placeStates.length <= 1) return;
-    Alert.alert('Eliminar plaza', `¿Eliminar la Plaza ${idx + 1}?`, [
+    AppAlert.alert('Eliminar plaza', `¿Eliminar la Plaza ${idx + 1}?`, [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Eliminar', style: 'destructive', onPress: () => {
@@ -214,9 +264,9 @@ export default function ConfigurePlacesScreen() {
   const saveNewVehicle = async (plazaIdx: number) => {
     if (!session?.user?.id) return;
     const nv = placeStates[plazaIdx].newVehicle;
-    if (!nv.brand.trim()) { Alert.alert('Marca obligatoria'); return; }
-    if (!nv.model.trim()) { Alert.alert('Modelo obligatorio'); return; }
-    if (!isValidSpanishPlate(nv.plate)) { Alert.alert('Matrícula inválida', 'Formato esperado: 1234ABC.'); return; }
+    if (!nv.brand.trim()) { AppAlert.alert('Marca obligatoria'); return; }
+    if (!nv.model.trim()) { AppAlert.alert('Modelo obligatorio'); return; }
+    if (!isValidSpanishPlate(nv.plate)) { AppAlert.alert('Matrícula inválida', 'Formato esperado: 1234ABC.'); return; }
     updatePlaza(plazaIdx, 'savingVehicle', true);
     const { data, error } = await supabase.from('vehicles').insert({
       user_id: session.user.id,
@@ -229,7 +279,7 @@ export default function ConfigurePlacesScreen() {
 
     updatePlaza(plazaIdx, 'savingVehicle', false);
     if (error) {
-      Alert.alert('Error', (error as any).code === '23505' ? 'Ya tienes ese vehículo registrado.' : error.message);
+      AppAlert.alert('Error', (error as any).code === '23505' ? 'Ya tienes ese vehículo registrado.' : error.message);
       return;
     }
     const inserted = data as Vehicle;
@@ -241,60 +291,70 @@ export default function ConfigurePlacesScreen() {
 
   const scrollToTop = () => scrollRef.current?.scrollTo({ y: 0, animated: false });
 
+  const validatePlaza = (idx: number): boolean => {
+    const s = placeStates[idx];
+    const plazaLabel = placeStates.length > 1 ? `Plaza ${idx + 1} — ` : '';
+
+    if (idx === 0) {
+      if (!s.selectedVehicleId) {
+        AppAlert.alert('Vehículo requerido', `${plazaLabel}Selecciona tu vehículo para continuar.`);
+        return false;
+      }
+    } else {
+      if (!s.companionVehicle.plate.trim()) {
+        AppAlert.alert('Matrícula requerida', `${plazaLabel}Indica la matrícula del vehículo del acompañante.`);
+        return false;
+      }
+      if (!isValidSpanishPlate(s.companionVehicle.plate)) {
+        AppAlert.alert('Matrícula inválida', `${plazaLabel}Formato esperado: 1234ABC.`);
+        return false;
+      }
+    }
+
+    for (let j = 0; j < s.guests.length; j++) {
+      const g = s.guests[j];
+      const label = `${plazaLabel}Viajero ${j + 1}`;
+
+      if (!g.full_name.trim()) {
+        AppAlert.alert('Nombre requerido', `${label}: indica el nombre completo.`);
+        return false;
+      }
+      const docErr = validateDoc(g.doc_type, g.doc_number);
+      if (docErr) {
+        AppAlert.alert('Documento inválido', `${label}: ${docErr}`);
+        return false;
+      }
+      if (!g.birth_date.trim()) {
+        AppAlert.alert('Fecha requerida', `${label}: indica la fecha de nacimiento.`);
+        return false;
+      }
+      if (!isAdult(g.birth_date)) {
+        AppAlert.alert('Edad mínima', `${label}: el viajero debe tener al menos 18 años.`);
+        return false;
+      }
+      if (g.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(g.email.trim())) {
+        AppAlert.alert('Email inválido', `${label}: el email no tiene un formato válido.`);
+        return false;
+      }
+    }
+
+    return true;
+  };
+
   const handleNext = () => {
+    if (!validatePlaza(activePlaza)) return;
+
     if (activePlaza < placeStates.length - 1) {
       setActivePlaza(activePlaza + 1);
       scrollToTop();
       return;
     }
-    // Last plaza → validate all and continue
-    for (let i = 0; i < placeStates.length; i++) {
-      const s = placeStates[i];
 
-      // Vehicle validation
-      if (i === 0) {
-        if (!s.selectedVehicleId) {
-          Alert.alert('Vehículo requerido', 'Plaza 1: selecciona tu vehículo.');
-          setActivePlaza(0);
-          return;
-        }
-      } else {
-        if (!s.companionVehicle.plate.trim()) {
-          Alert.alert('Matrícula requerida', `Plaza ${i + 1}: indica la matrícula del vehículo del acompañante.`);
-          setActivePlaza(i);
-          return;
-        }
-        if (!isValidSpanishPlate(s.companionVehicle.plate)) {
-          Alert.alert('Matrícula inválida', `Plaza ${i + 1}: formato esperado: 1234ABC.`);
-          setActivePlaza(i);
-          return;
-        }
-      }
-
-      // Guest validation
-      for (let j = 0; j < s.guests.length; j++) {
-        const g = s.guests[j];
-        const label = `Plaza ${i + 1}, Viajero ${j + 1}`;
-
-        if (!g.full_name.trim()) {
-          Alert.alert('Nombre requerido', `${label}: indica el nombre completo.`);
-          setActivePlaza(i); return;
-        }
-        const docErr = validateDoc(g.doc_type, g.doc_number);
-        if (docErr) {
-          Alert.alert('Documento inválido', `${label}: ${docErr}`);
-          setActivePlaza(i); return;
-        }
-        // Validar fecha DD/MM/AAAA
-        if (!g.birth_date.trim()) {
-          Alert.alert('Fecha requerida', `${label}: indica la fecha de nacimiento.`);
-          setActivePlaza(i); return;
-        }
-        // Email básico (si se rellena)
-        if (g.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(g.email.trim())) {
-          Alert.alert('Email inválido', `${label}: el email no tiene un formato válido.`);
-          setActivePlaza(i); return;
-        }
+    // Última plaza — re-valida todas por si el usuario volvió atrás y cambió algo
+    for (let i = 0; i < placeStates.length - 1; i++) {
+      if (!validatePlaza(i)) {
+        setActivePlaza(i);
+        return;
       }
     }
 
@@ -313,13 +373,13 @@ export default function ConfigurePlacesScreen() {
     }));
 
     setPending(prev => ({ ...prev, numPlaces: placeConfigs.length, placeConfigs }));
-    router.push('/(screens)/date-picker');
+    router.push('/(main)/reservations/date-picker');
   };
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" />
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
@@ -332,50 +392,52 @@ export default function ConfigurePlacesScreen() {
   const atLimit = s.numGuests >= 6;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FC' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <StepProgress current={2} />
       {/* Header */}
-      <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 }}>
-        <Text style={{ fontSize: 20, fontWeight: '700' }}>Configurar tus plazas</Text>
-        <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Paso 2 de 5</Text>
+      <View style={{ paddingHorizontal: spacing['2xl'], paddingTop: spacing.xs, paddingBottom: spacing.sm }}>
+        <Pressable onPress={() => router.back()} style={{ paddingVertical: 4, alignSelf: 'flex-start' }}>
+          <Text style={{ ...typography.titleSm, color: colors.secondary }}>‹ Volver</Text>
+        </Pressable>
+        <Text style={{ ...typography.titleLg, marginTop: 4 }}>Configurar tus plazas</Text>
       </View>
 
       {/* Plaza tabs */}
-      <View style={{ flexDirection: 'row', paddingHorizontal: 16, gap: 8, paddingBottom: 8, flexWrap: 'wrap' }}>
+      <View style={{ flexDirection: 'row', paddingHorizontal: spacing.lg, gap: spacing.sm, paddingBottom: spacing.sm, flexWrap: 'wrap' }}>
         {placeStates.map((_, i) => (
           <Pressable
             key={i}
             onPress={() => { setActivePlaza(i); scrollToTop(); }}
             style={{
               flexDirection: 'row', alignItems: 'center', gap: 4,
-              paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
-              backgroundColor: activePlaza === i ? '#111' : '#E5E7EB',
+              paddingHorizontal: 14, paddingVertical: 8, borderRadius: radii.full,
+              backgroundColor: activePlaza === i ? colors.primary : colors.surfaceContainerHigh,
             }}
           >
-            <Text style={{ color: activePlaza === i ? '#fff' : '#333', fontWeight: '600', fontSize: 13 }}>
+            <Text style={{ ...typography.titleSm, color: activePlaza === i ? colors.onPrimary : colors.onSurface }}>
               Plaza {i + 1}
             </Text>
             {placeStates.length > 1 && (
               <Pressable onPress={() => removePlaza(i)} hitSlop={8}>
-                <Text style={{ color: activePlaza === i ? '#fff' : '#666', fontSize: 13, fontWeight: '700' }}>×</Text>
+                <Text style={{ color: activePlaza === i ? colors.onPrimary : colors.onSurfaceVariant, fontSize: 15, fontFamily: 'PlusJakartaSans_700Bold' }}>×</Text>
               </Pressable>
             )}
           </Pressable>
         ))}
         <Pressable
           onPress={addPlaza}
-          style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1.5, borderColor: '#1A73E8', borderStyle: 'dashed' }}
+          style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: radii.full, borderWidth: 1.5, borderColor: colors.secondary, borderStyle: 'dashed' }}
         >
-          <Text style={{ color: '#1A73E8', fontWeight: '600', fontSize: 13 }}>+ Añadir plaza</Text>
+          <Text style={{ ...typography.titleSm, color: colors.secondary }}>+ Añadir plaza</Text>
         </Pressable>
       </View>
 
-      <ScrollView ref={scrollRef} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}>
+      <ScrollView ref={scrollRef} contentContainerStyle={{ paddingHorizontal: spacing['2xl'], paddingBottom: 40 }}>
 
         {/* ── VEHÍCULO ── */}
         <Text style={groupLabel}>Vehículo</Text>
 
         {isMainPlaza ? (
-          // Plaza 0: selección de vehículo guardado del usuario
           <>
             {vehicles.map(v => {
               const sel = s.selectedVehicleId === v.id;
@@ -384,78 +446,81 @@ export default function ConfigurePlacesScreen() {
                   key={v.id}
                   onPress={() => updatePlaza(activePlaza, 'selectedVehicleId', v.id)}
                   style={{
-                    borderRadius: 12, padding: 14, marginBottom: 8,
-                    backgroundColor: sel ? '#111' : '#fff',
+                    borderRadius: radii.md, padding: 14, marginBottom: 8,
+                    backgroundColor: sel ? colors.primary : colors.surfaceContainerLow,
                     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                    ...shadow.sm,
                   }}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                    <Text style={{ fontSize: 20 }}>🚐</Text>
+                    <Ionicons name="car-outline" size={20} color={sel ? colors.onPrimary : colors.onSurface} />
                     <View>
-                      <Text style={{ fontWeight: '700', fontSize: 14, color: sel ? '#fff' : '#111' }}>
+                      <Text style={{ ...typography.titleSm, color: sel ? colors.onPrimary : colors.onSurface }}>
                         {vehicleDisplayName(v)}
                       </Text>
-                      <Text style={{ color: sel ? '#ccc' : '#888', fontSize: 12 }}>{v.plate}</Text>
+                      <Text style={{ ...typography.bodyMd, color: sel ? 'rgba(255,255,255,0.7)' : colors.onSurfaceVariant }}>
+                        {v.plate}
+                      </Text>
                     </View>
                   </View>
-                  {sel && <Text style={{ color: '#fff', fontSize: 18 }}>✓</Text>}
+                  {sel && <Ionicons name="checkmark" size={18} color={colors.onPrimary} />}
                 </Pressable>
               );
             })}
 
             {s.showNewVehicleForm ? (
-              <View style={{ borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, padding: 12, gap: 8, marginBottom: 8 }}>
-                <Text style={{ fontWeight: '700' }}>Nuevo vehículo</Text>
-                <TextInput value={s.newVehicle.brand} onChangeText={v => updateNewVehicleField(activePlaza, 'brand', v)} placeholder="Marca *" style={input} autoCapitalize="words" />
-                <TextInput value={s.newVehicle.model} onChangeText={v => updateNewVehicleField(activePlaza, 'model', v)} placeholder="Modelo *" style={input} />
-                <TextInput value={s.newVehicle.plate} onChangeText={v => updateNewVehicleField(activePlaza, 'plate', v)} placeholder="Matrícula * (1234ABC)" style={input} autoCapitalize="characters" autoCorrect={false} />
-                <TextInput value={s.newVehicle.alias} onChangeText={v => updateNewVehicleField(activePlaza, 'alias', v)} placeholder="Alias (opcional)" style={input} />
+              <View style={{ borderWidth: 1, borderColor: colors.outline, borderRadius: radii.md, padding: spacing.md, gap: 8, marginBottom: 8, backgroundColor: colors.surfaceContainerLow }}>
+                <Text style={typography.titleSm}>Nuevo vehículo</Text>
+                <TextInput value={s.newVehicle.brand} onChangeText={v => updateNewVehicleField(activePlaza, 'brand', v)} placeholder="Marca *" placeholderTextColor={colors.onSurfaceVariant} style={input} autoCapitalize="words" />
+                <TextInput value={s.newVehicle.model} onChangeText={v => updateNewVehicleField(activePlaza, 'model', v)} placeholder="Modelo *" placeholderTextColor={colors.onSurfaceVariant} style={input} />
+                <TextInput value={s.newVehicle.plate} onChangeText={v => updateNewVehicleField(activePlaza, 'plate', v)} placeholder="Matrícula * (1234ABC)" placeholderTextColor={colors.onSurfaceVariant} style={input} autoCapitalize="characters" autoCorrect={false} />
+                <TextInput value={s.newVehicle.alias} onChangeText={v => updateNewVehicleField(activePlaza, 'alias', v)} placeholder="Alias (opcional)" placeholderTextColor={colors.onSurfaceVariant} style={input} />
                 <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <Pressable onPress={() => updatePlaza(activePlaza, 'showNewVehicleForm', false)} disabled={s.savingVehicle} style={{ flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: '#ddd', alignItems: 'center' }}>
-                    <Text style={{ fontWeight: '600' }}>Cancelar</Text>
+                  <Pressable onPress={() => updatePlaza(activePlaza, 'showNewVehicleForm', false)} disabled={s.savingVehicle} style={{ flex: 1, paddingVertical: 10, borderRadius: radii.sm, borderWidth: 1, borderColor: colors.outline, alignItems: 'center', backgroundColor: colors.surfaceContainerHigh }}>
+                    <Text style={typography.titleSm}>Cancelar</Text>
                   </Pressable>
-                  <Pressable onPress={() => saveNewVehicle(activePlaza)} disabled={s.savingVehicle} style={{ flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: '#1A73E8', alignItems: 'center' }}>
-                    <Text style={{ color: '#fff', fontWeight: '700' }}>{s.savingVehicle ? 'Guardando…' : 'Guardar y elegir'}</Text>
+                  <Pressable onPress={() => saveNewVehicle(activePlaza)} disabled={s.savingVehicle} style={{ flex: 1, paddingVertical: 10, borderRadius: radii.sm, backgroundColor: colors.primary, alignItems: 'center' }}>
+                    <Text style={{ ...typography.titleSm, color: colors.onPrimary }}>{s.savingVehicle ? 'Guardando…' : 'Guardar y elegir'}</Text>
                   </Pressable>
                 </View>
               </View>
             ) : (
-              <Pressable onPress={() => updatePlaza(activePlaza, 'showNewVehicleForm', true)} style={{ paddingVertical: 12, borderRadius: 12, alignItems: 'center', marginBottom: 16 }}>
-                <Text style={{ color: '#1A73E8', fontWeight: '600' }}>+ Añadir vehículo nuevo</Text>
+              <Pressable onPress={() => updatePlaza(activePlaza, 'showNewVehicleForm', true)} style={{ paddingVertical: 12, borderRadius: radii.md, alignItems: 'center', marginBottom: spacing.lg, borderWidth: 1.5, borderColor: colors.secondary, borderStyle: 'dashed' }}>
+                <Text style={{ ...typography.titleSm, color: colors.secondary }}>+ Añadir vehículo nuevo</Text>
               </Pressable>
             )}
           </>
         ) : s.companionVehicleConfirmed ? (
-          // Plaza 1+: card de vehículo confirmado (igual que saved vehicle en plaza 0)
           <Pressable
             onPress={() => updatePlaza(activePlaza, 'companionVehicleConfirmed', false)}
             style={{
-              borderRadius: 12, padding: 14, marginBottom: 16,
-              backgroundColor: '#111',
+              borderRadius: radii.md, padding: 14, marginBottom: spacing.lg,
+              backgroundColor: colors.primary,
               flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+              ...shadow.sm,
             }}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Text style={{ fontSize: 20 }}>🚐</Text>
+              <Ionicons name="car-outline" size={20} color={colors.onPrimary} />
               <View>
-                <Text style={{ fontWeight: '700', fontSize: 14, color: '#fff' }}>
+                <Text style={{ ...typography.titleSm, color: colors.onPrimary }}>
                   {s.companionVehicle.alias || [s.companionVehicle.brand, s.companionVehicle.model].filter(Boolean).join(' ') || 'Vehículo acompañante'}
                 </Text>
-                <Text style={{ color: '#ccc', fontSize: 12 }}>{s.companionVehicle.plate}</Text>
+                <Text style={{ ...typography.bodyMd, color: 'rgba(255,255,255,0.7)' }}>{s.companionVehicle.plate}</Text>
               </View>
             </View>
-            <Text style={{ color: '#aaa', fontSize: 12 }}>Editar</Text>
+            <Text style={{ ...typography.bodyMd, color: 'rgba(255,255,255,0.65)' }}>Editar</Text>
           </Pressable>
         ) : (
-          // Plaza 1+: formulario libre para el vehículo del acompañante (no se guarda en BD)
-          <View style={{ borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, padding: 12, gap: 8, marginBottom: 16 }}>
-            <Text style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>
+          <View style={{ borderWidth: 1, borderColor: colors.outline, borderRadius: radii.md, padding: spacing.md, gap: 8, marginBottom: spacing.lg, backgroundColor: colors.surfaceContainerLow }}>
+            <Text style={{ ...typography.bodyMd, marginBottom: 4 }}>
               Datos del vehículo del acompañante. No se guardarán en tu perfil.
             </Text>
             <TextInput
               value={s.companionVehicle.brand}
               onChangeText={v => updateCompanionVehicle(activePlaza, 'brand', v)}
               placeholder="Marca (opcional)"
+              placeholderTextColor={colors.onSurfaceVariant}
               style={input}
               autoCapitalize="words"
             />
@@ -463,12 +528,14 @@ export default function ConfigurePlacesScreen() {
               value={s.companionVehicle.model}
               onChangeText={v => updateCompanionVehicle(activePlaza, 'model', v)}
               placeholder="Modelo (opcional)"
+              placeholderTextColor={colors.onSurfaceVariant}
               style={input}
             />
             <TextInput
               value={s.companionVehicle.plate}
               onChangeText={v => updateCompanionVehicle(activePlaza, 'plate', v)}
               placeholder="Matrícula *"
+              placeholderTextColor={colors.onSurfaceVariant}
               style={input}
               autoCapitalize="characters"
               autoCorrect={false}
@@ -477,19 +544,23 @@ export default function ConfigurePlacesScreen() {
               value={s.companionVehicle.alias}
               onChangeText={v => updateCompanionVehicle(activePlaza, 'alias', v)}
               placeholder="Alias (opcional)"
+              placeholderTextColor={colors.onSurfaceVariant}
               style={input}
             />
             <Pressable
               onPress={() => {
                 if (!s.companionVehicle.plate.trim()) {
-                  Alert.alert('Matrícula requerida', 'Indica la matrícula del vehículo.');
+                  AppAlert.alert('Matrícula requerida', 'Indica la matrícula del vehículo.');
                   return;
                 }
                 updatePlaza(activePlaza, 'companionVehicleConfirmed', true);
               }}
-              style={{ backgroundColor: '#111', paddingVertical: 12, borderRadius: 10, alignItems: 'center', marginTop: 4 }}
+              style={{ backgroundColor: colors.primary, paddingVertical: 12, borderRadius: radii.sm, alignItems: 'center', marginTop: 4 }}
             >
-              <Text style={{ color: '#fff', fontWeight: '700' }}>Listo ✓</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={{ ...typography.titleSm, color: colors.onPrimary, lineHeight: 18 }}>Listo</Text>
+                <Ionicons name="checkmark" size={16} color={colors.onPrimary} />
+              </View>
             </Pressable>
           </View>
         )}
@@ -518,13 +589,13 @@ export default function ConfigurePlacesScreen() {
 
         {/* At-limit warning */}
         {atLimit && (
-          <View style={{ backgroundColor: '#FFFBEB', borderRadius: 12, padding: 14, marginBottom: 16, borderLeftWidth: 3, borderLeftColor: '#F59E0B', flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
-            <Text style={{ fontSize: 18 }}>⚠️</Text>
+          <View style={{ backgroundColor: colors.warningContainer, borderRadius: radii.md, padding: 14, marginBottom: spacing.lg, borderLeftWidth: 3, borderLeftColor: colors.warning, flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+            <Ionicons name="warning-outline" size={18} color={colors.warningText} />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontWeight: '700', color: '#92400E', marginBottom: 4 }}>Plaza al máximo.</Text>
-              <Text style={{ color: '#78350F', fontSize: 13 }}>¿Faltan personas por añadir?</Text>
-              <Pressable onPress={addPlaza} style={{ marginTop: 10, backgroundColor: '#111', paddingVertical: 10, borderRadius: 8, alignItems: 'center' }}>
-                <Text style={{ color: '#fff', fontWeight: '700' }}>+ Añadir plaza</Text>
+              <Text style={{ ...typography.titleSm, color: colors.warningText, marginBottom: 4 }}>Plaza al máximo.</Text>
+              <Text style={{ ...typography.bodyMd, color: colors.warningText }}>¿Faltan personas por añadir?</Text>
+              <Pressable onPress={addPlaza} style={{ marginTop: 10, backgroundColor: colors.primary, paddingVertical: 10, borderRadius: radii.sm, alignItems: 'center' }}>
+                <Text style={{ ...typography.titleSm, color: colors.onPrimary }}>+ Añadir plaza</Text>
               </Pressable>
             </View>
           </View>
@@ -532,7 +603,7 @@ export default function ConfigurePlacesScreen() {
 
         {/* ── DATOS DE LOS VIAJEROS ── */}
         <Text style={[groupLabel, { marginTop: 8 }]}>Datos de los viajeros</Text>
-        <Text style={{ fontSize: 12, color: '#888', marginBottom: 12 }}>
+        <Text style={{ ...typography.bodyMd, marginBottom: 12 }}>
           Necesarios para el registro SES. Mantén esta información actualizada.
         </Text>
 
@@ -541,8 +612,8 @@ export default function ConfigurePlacesScreen() {
           return (
             <View key={gi} style={card}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#111' }} />
-                <Text style={{ fontWeight: '700', fontSize: 14 }}>
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary }} />
+                <Text style={typography.titleSm}>
                   {isTitular ? 'Titular — ' : ''}Viajero {gi + 1}
                 </Text>
               </View>
@@ -553,6 +624,7 @@ export default function ConfigurePlacesScreen() {
                 value={g.full_name}
                 onChangeText={v => updateGuest(activePlaza, gi, 'full_name', v)}
                 placeholder="Nombre y apellidos"
+                placeholderTextColor={colors.onSurfaceVariant}
                 autoCapitalize="words"
                 style={input}
               />
@@ -565,13 +637,13 @@ export default function ConfigurePlacesScreen() {
                     key={type}
                     onPress={() => updateGuest(activePlaza, gi, 'doc_type', type)}
                     style={{
-                      flex: 1, paddingVertical: 8, borderRadius: 8, borderWidth: 1.5,
-                      borderColor: g.doc_type === type ? '#1A73E8' : '#E5E7EB',
-                      backgroundColor: g.doc_type === type ? '#EAF1FE' : '#fff',
+                      flex: 1, paddingVertical: 8, borderRadius: radii.sm, borderWidth: 1.5,
+                      borderColor: g.doc_type === type ? colors.secondary : colors.outline,
+                      backgroundColor: g.doc_type === type ? colors.secondaryContainer : colors.inputSurface,
                       alignItems: 'center',
                     }}
                   >
-                    <Text style={{ fontWeight: '600', fontSize: 11, color: g.doc_type === type ? '#1A73E8' : '#555' }}>
+                    <Text style={{ ...typography.labelMd, color: g.doc_type === type ? colors.onSecondaryContainer : colors.onSurface }}>
                       {type === 'passport' ? 'Pasaporte' : type.toUpperCase()}
                     </Text>
                   </Pressable>
@@ -584,6 +656,7 @@ export default function ConfigurePlacesScreen() {
                 value={g.doc_number}
                 onChangeText={v => updateGuest(activePlaza, gi, 'doc_number', v)}
                 placeholder={g.doc_type === 'passport' ? 'Nº pasaporte' : 'DNI / NIE'}
+                placeholderTextColor={colors.onSurfaceVariant}
                 autoCapitalize="characters"
                 autoCorrect={false}
                 style={input}
@@ -595,6 +668,7 @@ export default function ConfigurePlacesScreen() {
                 value={g.doc_support_number}
                 onChangeText={v => updateGuest(activePlaza, gi, 'doc_support_number', v)}
                 placeholder="Nº en el reverso del documento"
+                placeholderTextColor={colors.onSurfaceVariant}
                 autoCapitalize="characters"
                 autoCorrect={false}
                 style={input}
@@ -607,7 +681,7 @@ export default function ConfigurePlacesScreen() {
                   value={parseBirthDate(g.birth_date)}
                   mode="date"
                   display="compact"
-                  maximumDate={new Date()}
+                  maximumDate={maxBirthDate()}
                   onChange={(_: DateTimePickerEvent, date?: Date) => {
                     if (date) updateGuest(activePlaza, gi, 'birth_date', dateToBirthString(date));
                   }}
@@ -619,7 +693,7 @@ export default function ConfigurePlacesScreen() {
                     onPress={() => setShowBirthPicker({ plaza: activePlaza, guest: gi })}
                     style={[input, { justifyContent: 'center' }]}
                   >
-                    <Text style={{ fontSize: 14, color: g.birth_date ? '#111' : '#aaa' }}>
+                    <Text style={{ ...typography.bodyLg, color: g.birth_date ? colors.onSurface : colors.onSurfaceVariant }}>
                       {g.birth_date || 'Seleccionar fecha'}
                     </Text>
                   </Pressable>
@@ -628,7 +702,7 @@ export default function ConfigurePlacesScreen() {
                       value={parseBirthDate(g.birth_date)}
                       mode="date"
                       display="default"
-                      maximumDate={new Date()}
+                      maximumDate={maxBirthDate()}
                       onChange={(_: DateTimePickerEvent, date?: Date) => {
                         setShowBirthPicker(null);
                         if (date) updateGuest(activePlaza, gi, 'birth_date', dateToBirthString(date));
@@ -636,6 +710,11 @@ export default function ConfigurePlacesScreen() {
                     />
                   )}
                 </>
+              )}
+              {g.birth_date.trim() !== '' && !isAdult(g.birth_date) && (
+                <Text style={{ ...typography.bodyMd, color: colors.error, marginTop: 4 }}>
+                  El viajero debe tener al menos 18 años.
+                </Text>
               )}
 
               {/* Género */}
@@ -646,13 +725,13 @@ export default function ConfigurePlacesScreen() {
                     key={val}
                     onPress={() => updateGuest(activePlaza, gi, 'gender', val)}
                     style={{
-                      flex: 1, paddingVertical: 8, borderRadius: 8, borderWidth: 1.5,
-                      borderColor: g.gender === val ? '#1A73E8' : '#E5E7EB',
-                      backgroundColor: g.gender === val ? '#EAF1FE' : '#fff',
+                      flex: 1, paddingVertical: 8, borderRadius: radii.sm, borderWidth: 1.5,
+                      borderColor: g.gender === val ? colors.secondary : colors.outline,
+                      backgroundColor: g.gender === val ? colors.secondaryContainer : colors.inputSurface,
                       alignItems: 'center',
                     }}
                   >
-                    <Text style={{ fontWeight: '600', fontSize: 11, color: g.gender === val ? '#1A73E8' : '#555' }}>
+                    <Text style={{ ...typography.labelMd, color: g.gender === val ? colors.onSecondaryContainer : colors.onSurface }}>
                       {label}
                     </Text>
                   </Pressable>
@@ -665,6 +744,7 @@ export default function ConfigurePlacesScreen() {
                 value={g.nationality}
                 onChangeText={v => updateGuest(activePlaza, gi, 'nationality', v)}
                 placeholder="ES"
+                placeholderTextColor={colors.onSurfaceVariant}
                 autoCapitalize="characters"
                 autoCorrect={false}
                 style={input}
@@ -676,6 +756,7 @@ export default function ConfigurePlacesScreen() {
                 value={g.country_of_residence}
                 onChangeText={v => updateGuest(activePlaza, gi, 'country_of_residence', v)}
                 placeholder="España"
+                placeholderTextColor={colors.onSurfaceVariant}
                 autoCapitalize="words"
                 style={input}
               />
@@ -686,18 +767,16 @@ export default function ConfigurePlacesScreen() {
                 value={g.city_of_residence}
                 onChangeText={v => updateGuest(activePlaza, gi, 'city_of_residence', v)}
                 placeholder="Ciudad o municipio"
+                placeholderTextColor={colors.onSurfaceVariant}
                 autoCapitalize="words"
                 style={input}
               />
 
               {/* Teléfono */}
               <Text style={fieldLabel}>Teléfono</Text>
-              <TextInput
+              <PhoneInput
                 value={g.phone}
-                onChangeText={v => updateGuest(activePlaza, gi, 'phone', v)}
-                placeholder="+34 600 000 000"
-                keyboardType="phone-pad"
-                style={input}
+                onChange={v => updateGuest(activePlaza, gi, 'phone', v)}
               />
 
               {/* Email */}
@@ -706,6 +785,7 @@ export default function ConfigurePlacesScreen() {
                 value={g.email}
                 onChangeText={v => updateGuest(activePlaza, gi, 'email', v)}
                 placeholder="correo@ejemplo.com"
+                placeholderTextColor={colors.onSurfaceVariant}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -719,9 +799,9 @@ export default function ConfigurePlacesScreen() {
         <Text style={groupLabel}>Electricidad</Text>
         <View style={[card, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
           <View style={{ flex: 1 }}>
-            <Text style={{ fontWeight: '600', fontSize: 15 }}>Contratar electricidad</Text>
+            <Text style={typography.titleSm}>Contratar electricidad</Text>
             {powerExtra && (
-              <Text style={{ color: '#888', fontSize: 12, marginTop: 2 }}>
+              <Text style={{ ...typography.bodyMd, marginTop: 2 }}>
                 Suplemento: {formatCents(powerExtra.unit_amount_cents)} / noche
               </Text>
             )}
@@ -729,8 +809,8 @@ export default function ConfigurePlacesScreen() {
           <Switch
             value={s.electricidad}
             onValueChange={v => updatePlaza(activePlaza, 'electricidad', v)}
-            trackColor={{ true: '#1A73E8', false: '#E5E7EB' }}
-            thumbColor="#fff"
+            trackColor={{ true: colors.primary, false: colors.outline }}
+            thumbColor={colors.onPrimary}
           />
         </View>
 
@@ -738,16 +818,86 @@ export default function ConfigurePlacesScreen() {
         <Pressable
           onPress={handleNext}
           style={({ pressed }) => ({
-            backgroundColor: '#111', paddingVertical: 16, borderRadius: 14,
-            alignItems: 'center', marginTop: 8, opacity: pressed ? 0.7 : 1,
+            backgroundColor: colors.primary,
+            paddingVertical: 16,
+            borderRadius: radii.md,
+            alignItems: 'center',
+            marginTop: 8,
+            opacity: pressed ? 0.7 : 1,
+            ...shadow.sm,
           })}
         >
-          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>
+          <Text style={{ ...typography.titleMd, color: colors.onPrimary }}>
             {isLastPlaza ? 'Confirmar y elegir fechas →' : 'Siguiente plaza →'}
           </Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function PhoneInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const { prefix, digits } = parsePhone(value);
+  const prefixObj = PHONE_PREFIXES.find(p => p.code === prefix) ?? PHONE_PREFIXES[0];
+
+  return (
+    <>
+      <View style={[input, { flexDirection: 'row', alignItems: 'center', padding: 0, overflow: 'hidden' }]}>
+        <Pressable
+          onPress={() => setOpen(v => !v)}
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: 4,
+            paddingHorizontal: 10, paddingVertical: 10,
+            borderRightWidth: 1, borderRightColor: colors.outline,
+          }}
+        >
+          <Text style={{ fontSize: 16 }}>{prefixObj.flag}</Text>
+          <Text style={{ ...typography.bodyLg, color: colors.onSurface, minWidth: 32 }}>{prefix}</Text>
+          <Text style={{ color: colors.onSurfaceVariant, fontSize: 9 }}>▾</Text>
+        </Pressable>
+        <TextInput
+          value={digits}
+          onChangeText={t => onChange(prefix + ' ' + t.trimStart())}
+          placeholder="600 000 000"
+          placeholderTextColor={colors.onSurfaceVariant}
+          keyboardType="phone-pad"
+          style={{
+            flex: 1,
+            ...typography.bodyLg,
+            color: colors.onSurface,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+          }}
+        />
+      </View>
+      {open && (
+        <View style={{
+          borderWidth: 1, borderColor: colors.outline, borderRadius: radii.sm,
+          backgroundColor: colors.inputSurface, marginTop: 4,
+          overflow: 'hidden', ...shadow.sm,
+        }}>
+          {PHONE_PREFIXES.map((p, idx) => (
+            <Pressable
+              key={p.code}
+              onPress={() => { onChange(p.code + ' ' + digits.trim()); setOpen(false); }}
+              style={({ pressed }) => ({
+                flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11,
+                backgroundColor: p.code === prefix
+                  ? colors.secondaryContainer
+                  : pressed ? colors.surfaceContainerHigh : 'transparent',
+                borderTopWidth: idx === 0 ? 0 : 1,
+                borderTopColor: colors.outlineVariant,
+              })}
+            >
+              <Text style={{ fontSize: 18 }}>{p.flag}</Text>
+              <Text style={{ ...typography.bodyLg, flex: 1, color: colors.onSurface }}>{p.label}</Text>
+              <Text style={typography.bodyMd}>{p.code}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+    </>
   );
 }
 
@@ -760,16 +910,16 @@ function CounterRow({
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 }}>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 15, fontWeight: '500' }}>{label}</Text>
-        {subtitle && <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{subtitle}</Text>}
+        <Text style={typography.bodyLg}>{label}</Text>
+        {subtitle && <Text style={{ ...typography.bodyMd, marginTop: 2 }}>{subtitle}</Text>}
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
         <Pressable onPress={onDecrement} disabled={value <= min} style={counterBtn}>
-          <Text style={{ fontSize: 20, fontWeight: '700', color: value <= min ? '#CCC' : '#111' }}>−</Text>
+          <Ionicons name="remove" size={20} color={value <= min ? colors.outline : colors.primary} />
         </Pressable>
-        <Text style={{ fontSize: 18, fontWeight: '700', minWidth: 24, textAlign: 'center' }}>{value}</Text>
+        <Text style={{ ...typography.titleLg, minWidth: 24, textAlign: 'center' }}>{value}</Text>
         <Pressable onPress={onIncrement} style={counterBtn}>
-          <Text style={{ fontSize: 20, fontWeight: '700' }}>+</Text>
+          <Ionicons name="add" size={20} color={colors.primary} />
         </Pressable>
       </View>
     </View>
@@ -777,11 +927,46 @@ function CounterRow({
 }
 
 const card = {
-  backgroundColor: '#fff', padding: 16, borderRadius: 16, marginBottom: 16,
-  shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2,
+  backgroundColor: colors.surfaceContainerLow,
+  padding: spacing.lg,
+  borderRadius: radii.md,
+  marginBottom: spacing.lg,
+  ...shadow.sm,
 };
-const groupLabel = { fontSize: 12, fontWeight: '700' as const, color: '#888', textTransform: 'uppercase' as const, letterSpacing: 0.8, marginBottom: 8 };
-const fieldLabel = { fontSize: 12, color: '#666', marginTop: 10, marginBottom: 4 };
-const input = { backgroundColor: '#F2F4F8', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 };
-const divider = { height: 1, backgroundColor: '#F0F0F0', marginVertical: 8 };
-const counterBtn = { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F2F4F8', alignItems: 'center' as const, justifyContent: 'center' as const };
+
+const groupLabel = {
+  ...typography.labelSm,
+  marginBottom: spacing.sm,
+};
+
+const fieldLabel = {
+  ...typography.labelLg,
+  marginTop: 10,
+  marginBottom: 4,
+};
+
+const input = {
+  backgroundColor: colors.inputSurface,
+  borderWidth: 1,
+  borderColor: colors.outline,
+  borderRadius: radii.sm,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  ...typography.bodyLg,
+  color: colors.onSurface,
+};
+
+const divider = {
+  height: 1,
+  backgroundColor: colors.outlineVariant,
+  marginVertical: 8,
+};
+
+const counterBtn = {
+  width: 36,
+  height: 36,
+  borderRadius: 18,
+  backgroundColor: colors.surfaceContainerHigh,
+  alignItems: 'center' as const,
+  justifyContent: 'center' as const,
+};

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -8,25 +9,11 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
 
 type Tab = 'privacy' | 'terms';
 type CmsSection = { title: string; content: string };
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {children}
-    </View>
-  );
-}
-
-function Body({ text }: { text: string }) {
-  return <Text style={styles.body}>{text}</Text>;
-}
 
 function BulletList({ items }: { items: string[] }) {
   return (
@@ -42,7 +29,7 @@ function BulletList({ items }: { items: string[] }) {
 }
 
 function renderContent(content: string): React.ReactNode[] {
-  const lines = content.split('\n').filter(l => l.trim() !== '');
+  const lines = content.split('\n').filter((l) => l.trim() !== '');
   const result: React.ReactNode[] = [];
   let bullets: string[] = [];
   lines.forEach((line, i) => {
@@ -53,7 +40,11 @@ function renderContent(content: string): React.ReactNode[] {
         result.push(<BulletList key={`bl-${i}`} items={bullets} />);
         bullets = [];
       }
-      result.push(<Body key={`b-${i}`} text={line} />);
+      result.push(
+        <Text key={`b-${i}`} style={styles.body}>
+          {line}
+        </Text>,
+      );
     }
   });
   if (bullets.length) result.push(<BulletList key="bl-end" items={bullets} />);
@@ -64,16 +55,23 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
 }
 
-export default function ProfilePrivacy() {
-  const router = useRouter();
-  const [activeTab, setActiveTab] = useState<Tab>('privacy');
+type Props = {
+  visible: boolean;
+  onClose: () => void;
+  initialTab?: Tab;
+};
+
+export default function PrivacyModal({ visible, onClose, initialTab = 'terms' }: Props) {
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [privacySections, setPrivacySections] = useState<CmsSection[]>([]);
   const [termsSections, setTermsSections] = useState<CmsSection[]>([]);
   const [privacyUpdatedAt, setPrivacyUpdatedAt] = useState<string | null>(null);
   const [termsUpdatedAt, setTermsUpdatedAt] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (!visible) return;
+    setLoading(true);
     void (async () => {
       const [pRes, tRes] = await Promise.all([
         supabase.from('cms_pages').select('content, updated_at').eq('id', 'privacy').maybeSingle(),
@@ -89,59 +87,67 @@ export default function ProfilePrivacy() {
       }
       setLoading(false);
     })();
-  }, []);
+  }, [visible]);
 
   const sections = activeTab === 'privacy' ? privacySections : termsSections;
   const updatedAt = activeTab === 'privacy' ? privacyUpdatedAt : termsUpdatedAt;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={8} style={styles.headerSide}>
-          <Text style={styles.headerBack}>‹ Atrás</Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>Política y privacidad</Text>
-        <View style={styles.headerSide} />
-      </View>
-
-      <View style={styles.tabs}>
-        <Pressable
-          style={[styles.tab, activeTab === 'privacy' && styles.tabActive]}
-          onPress={() => setActiveTab('privacy')}
-        >
-          <Text style={[styles.tabText, activeTab === 'privacy' && styles.tabTextActive]}>
-            Privacidad
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.tab, activeTab === 'terms' && styles.tabActive]}
-          onPress={() => setActiveTab('terms')}
-        >
-          <Text style={[styles.tabText, activeTab === 'terms' && styles.tabTextActive]}>
-            Términos
-          </Text>
-        </Pressable>
-      </View>
-
-      {loading ? (
-        <View style={styles.loadingWrap}>
-          <ActivityIndicator color={colors.primary} />
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
+      <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+        <View style={styles.header}>
+          <View style={styles.headerSide} />
+          <Text style={styles.headerTitle}>Política y privacidad</Text>
+          <Pressable onPress={onClose} hitSlop={12} style={styles.headerSide}>
+            <Text style={styles.closeBtn}>Cerrar</Text>
+          </Pressable>
         </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.container}>
-          {sections.map((s, i) => (
-            <Section key={i} title={s.title}>
-              {renderContent(s.content)}
-            </Section>
-          ))}
-          {updatedAt && (
-            <Text style={styles.lastUpdated}>
-              Última actualización: {formatDate(updatedAt)}
+
+        <View style={styles.tabs}>
+          <Pressable
+            style={[styles.tab, activeTab === 'terms' && styles.tabActive]}
+            onPress={() => setActiveTab('terms')}
+          >
+            <Text style={[styles.tabText, activeTab === 'terms' && styles.tabTextActive]}>
+              Términos
             </Text>
-          )}
-        </ScrollView>
-      )}
-    </SafeAreaView>
+          </Pressable>
+          <Pressable
+            style={[styles.tab, activeTab === 'privacy' && styles.tabActive]}
+            onPress={() => setActiveTab('privacy')}
+          >
+            <Text style={[styles.tabText, activeTab === 'privacy' && styles.tabTextActive]}>
+              Privacidad
+            </Text>
+          </Pressable>
+        </View>
+
+        {loading ? (
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={styles.container}>
+            {sections.map((s, i) => (
+              <View key={i} style={styles.section}>
+                <Text style={styles.sectionTitle}>{s.title}</Text>
+                {renderContent(s.content)}
+              </View>
+            ))}
+            {updatedAt && (
+              <Text style={styles.lastUpdated}>
+                Última actualización: {formatDate(updatedAt)}
+              </Text>
+            )}
+          </ScrollView>
+        )}
+      </SafeAreaView>
+    </Modal>
   );
 }
 
@@ -154,11 +160,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
     paddingVertical: 12,
-    backgroundColor: colors.background,
   },
   headerSide: { width: 70 },
-  headerBack: { ...typography.titleMd, color: colors.secondary },
   headerTitle: { ...typography.titleLg },
+  closeBtn: { ...typography.titleMd, color: colors.secondary, textAlign: 'right' },
 
   tabs: {
     flexDirection: 'row',

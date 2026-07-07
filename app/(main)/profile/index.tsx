@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Platform,
   Pressable,
@@ -14,11 +13,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter, useSegments } from 'expo-router';
 import Constants from 'expo-constants';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/providers/AuthProvider';
 import RequireAuthCard from '@/components/RequireAuthCard';
 import { supabase } from '@/lib/supabase';
 import { formatCents } from '@/components/utils/money';
 import { pickAndUploadAvatar, deleteAvatar } from '@/lib/uploadAvatar';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
+import { AppAlert } from '@/components/AppAlert';
 
 async function fetchVehicleCount(userId: string): Promise<number> {
   const { count, error } = await supabase
@@ -58,10 +60,8 @@ async function fetchExtrasCount(): Promise<number> {
   return count ?? 0;
 }
 
-// ── SettingsRow ──────────────────────────────────────────────────────────────
-
 type SettingsRowProps = {
-  icon: string;
+  icon: React.ReactNode;
   label: string;
   value?: string;
   valueWarning?: boolean;
@@ -83,13 +83,13 @@ function SettingsRow({
     <Pressable
       style={({ pressed }) => [
         styles.row,
-        pressed && onPress && { backgroundColor: '#f0f0f0' },
+        pressed && onPress && { backgroundColor: colors.surfaceContainerHigh },
       ]}
       onPress={onPress}
       disabled={!onPress}
     >
       <View style={styles.rowLeft}>
-        <Text style={styles.rowIcon}>{icon}</Text>
+        <View style={styles.rowIcon}>{icon}</View>
         <Text style={[styles.rowLabel, destructive && styles.destructiveLabel]}>
           {label}
         </Text>
@@ -112,21 +112,9 @@ function SectionLabel({ label }: { label: string }) {
   return <Text style={styles.sectionLabel}>{label}</Text>;
 }
 
-function SectionGroup({
-  children,
-  style,
-}: {
-  children: React.ReactNode;
-  style?: object;
-}) {
+function SectionGroup({ children, style }: { children: React.ReactNode; style?: object }) {
   return <View style={[styles.sectionGroup, style]}>{children}</View>;
 }
-
-function RowDivider() {
-  return <View style={styles.rowDivider} />;
-}
-
-// ── Screen ───────────────────────────────────────────────────────────────────
 
 export default function ProfileIndex() {
   const { session, signOut, isOwner } = useAuth();
@@ -142,7 +130,6 @@ export default function ProfileIndex() {
   const [extrasCount, setExtrasCount] = useState<number | null>(null);
 
   const user = session?.user;
-
   const isAdmin = (segments as string[]).includes('admin');
   const profileBase = isAdmin ? '/admin/profile' : '/(main)/profile';
 
@@ -217,7 +204,7 @@ export default function ProfileIndex() {
       const url = await pickAndUploadAvatar(user.id);
       if (url) setAvatarUrl(url);
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'No se pudo subir la foto.');
+      AppAlert.alert('Error', e?.message ?? 'No se pudo subir la foto.');
     } finally {
       setUploadingAvatar(false);
     }
@@ -230,7 +217,7 @@ export default function ProfileIndex() {
       await deleteAvatar(user.id);
       setAvatarUrl(null);
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'No se pudo eliminar la foto.');
+      AppAlert.alert('Error', e?.message ?? 'No se pudo eliminar la foto.');
     } finally {
       setUploadingAvatar(false);
     }
@@ -239,7 +226,7 @@ export default function ProfileIndex() {
   const handleChangeAvatar = () => {
     if (!user?.id) return;
     if (avatarUrl) {
-      Alert.alert('Foto de perfil', '¿Qué quieres hacer?', [
+      AppAlert.alert('Foto de perfil', '¿Qué quieres hacer?', [
         { text: 'Cambiar foto', onPress: doPickAvatar },
         { text: 'Eliminar foto', style: 'destructive', onPress: doDeleteAvatar },
         { text: 'Cancelar', style: 'cancel' },
@@ -250,14 +237,14 @@ export default function ProfileIndex() {
   };
 
   const handleSignOut = () => {
-    Alert.alert('Cerrar sesión', '¿Estás seguro?', [
+    AppAlert.alert('Cerrar sesión', '¿Estás seguro?', [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Cerrar sesión', onPress: signOut, style: 'destructive' },
     ]);
   };
 
   const handleDeleteAccount = () => {
-    Alert.alert(
+    AppAlert.alert(
       'Eliminar cuenta',
       'Se borrarán permanentemente tu perfil, vehículos y datos personales.\n\nLos registros de reservas y pagos se conservarán de forma anónima por obligación legal (GDPR art. 17 + normativa fiscal española).\n\nEsta acción no se puede deshacer.',
       [
@@ -266,7 +253,7 @@ export default function ProfileIndex() {
           text: 'Eliminar mi cuenta',
           style: 'destructive',
           onPress: () => {
-            Alert.alert(
+            AppAlert.alert(
               '¿Seguro?',
               'Confirma que quieres eliminar tu cuenta de forma permanente.',
               [
@@ -280,7 +267,7 @@ export default function ProfileIndex() {
                       if (error) throw error;
                       await signOut();
                     } catch (e: any) {
-                      Alert.alert('Error', e?.message ?? 'No se pudo eliminar la cuenta. Inténtalo de nuevo.');
+                      AppAlert.alert('Error', e?.message ?? 'No se pudo eliminar la cuenta. Inténtalo de nuevo.');
                     }
                   },
                 },
@@ -305,7 +292,6 @@ export default function ProfileIndex() {
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.container}>
 
-        {/* ── Cabecera de perfil ── */}
         <View style={styles.profileHeader}>
           <Pressable onPress={handleChangeAvatar} disabled={uploadingAvatar} style={styles.avatarWrapper}>
             {avatarUrl ? (
@@ -317,8 +303,8 @@ export default function ProfileIndex() {
             )}
             <View style={styles.avatarBadge}>
               {uploadingAvatar
-                ? <ActivityIndicator size="small" color="#fff" />
-                : <Text style={styles.avatarBadgeIcon}>📷</Text>
+                ? <ActivityIndicator size="small" color={colors.onPrimary} />
+                : <Ionicons name="camera" size={12} color={colors.onPrimary} />
               }
             </View>
           </Pressable>
@@ -329,11 +315,10 @@ export default function ProfileIndex() {
           </View>
         </View>
 
-        {/* ── CUENTA ── */}
         <SectionLabel label="CUENTA" />
         <SectionGroup>
           <SettingsRow
-            icon="👤"
+            icon={<Ionicons name="person-outline" size={18} color={colors.onSurfaceVariant} />}
             label="Datos personales"
             value={
               loadingMeta || profileComplete === null
@@ -346,25 +331,21 @@ export default function ProfileIndex() {
             onPress={() => router.push(`${profileBase}/edit` as any)}
           />
           {!isAdmin && (
-            <>
-              <RowDivider />
-              <SettingsRow
-                icon="🚗"
-                label="Mis vehículos"
-                value={loadingMeta ? '…' : vehicleSubtitle}
-                onPress={() => router.push(`${profileBase}/vehicles` as any)}
-              />
-            </>
+            <SettingsRow
+              icon={<Ionicons name="car-outline" size={18} color={colors.onSurfaceVariant} />}
+              label="Mis vehículos"
+              value={loadingMeta ? '…' : vehicleSubtitle}
+              onPress={() => router.push(`${profileBase}/vehicles` as any)}
+            />
           )}
         </SectionGroup>
 
-        {/* ── MI ÁREA (solo admin) ── */}
         {isAdmin && (
           <>
             <SectionLabel label="MI ÁREA" />
             <SectionGroup>
               <SettingsRow
-                icon="💶"
+                icon={<Ionicons name="pricetag-outline" size={18} color={colors.onSurfaceVariant} />}
                 label="Precio por noche"
                 value={
                   loadingMeta
@@ -375,9 +356,8 @@ export default function ProfileIndex() {
                 }
                 onPress={() => router.push(`${profileBase}/pricing` as any)}
               />
-              <RowDivider />
               <SettingsRow
-                icon="⚡"
+                icon={<Ionicons name="flash-outline" size={18} color={colors.onSurfaceVariant} />}
                 label="Extras"
                 value={
                   loadingMeta
@@ -388,17 +368,31 @@ export default function ProfileIndex() {
                 }
                 onPress={() => router.push(`${profileBase}/extras` as any)}
               />
+              <SettingsRow
+                icon={<Ionicons name="document-text-outline" size={18} color={colors.onSurfaceVariant} />}
+                label="Política y privacidad"
+                onPress={() => router.push(`${profileBase}/cms-privacy` as any)}
+              />
+              <SettingsRow
+                icon={<Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.onSurfaceVariant} />}
+                label="Preguntas frecuentes"
+                onPress={() => router.push(`${profileBase}/cms-faq` as any)}
+              />
+              <SettingsRow
+                icon={<Ionicons name="call-outline" size={18} color={colors.onSurfaceVariant} />}
+                label="Contáctanos"
+                onPress={() => router.push(`${profileBase}/cms-contact` as any)}
+              />
             </SectionGroup>
           </>
         )}
 
-        {/* ── SEGURIDAD ── */}
         {isEmailProvider && (
           <>
             <SectionLabel label="SEGURIDAD" />
             <SectionGroup>
               <SettingsRow
-                icon="🔒"
+                icon={<Ionicons name="lock-closed-outline" size={18} color={colors.onSurfaceVariant} />}
                 label="Contraseña"
                 onPress={() => router.push(`${profileBase}/password` as any)}
               />
@@ -406,26 +400,32 @@ export default function ProfileIndex() {
           </>
         )}
 
-        {/* ── APLICACIÓN ── */}
-        <SectionLabel label="APLICACIÓN" />
-        <SectionGroup>
-          <SettingsRow
-            icon="📄"
-            label="Política y privacidad"
-            onPress={() => router.push(`${profileBase}/privacy` as any)}
-          />
-          <RowDivider />
-          <SettingsRow
-            icon="💬"
-            label="¿Necesitas ayuda?"
-            onPress={() => router.push(`${profileBase}/contact` as any)}
-          />
-        </SectionGroup>
+        {!isAdmin && (
+          <>
+            <SectionLabel label="APLICACIÓN" />
+            <SectionGroup>
+              <SettingsRow
+                icon={<Ionicons name="document-text-outline" size={18} color={colors.onSurfaceVariant} />}
+                label="Política y privacidad"
+                onPress={() => router.push(`${profileBase}/privacy` as any)}
+              />
+              <SettingsRow
+                icon={<Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.onSurfaceVariant} />}
+                label="Preguntas frecuentes"
+                onPress={() => router.push(`${profileBase}/faq` as any)}
+              />
+              <SettingsRow
+                icon={<Ionicons name="call-outline" size={18} color={colors.onSurfaceVariant} />}
+                label="Contáctanos"
+                onPress={() => router.push(`${profileBase}/contact` as any)}
+              />
+            </SectionGroup>
+          </>
+        )}
 
-        {/* ── Cerrar sesión ── */}
         <SectionGroup style={{ marginTop: 32 }}>
           <SettingsRow
-            icon="🚪"
+            icon={<Ionicons name="log-out-outline" size={18} color={colors.error} />}
             label="Cerrar sesión"
             onPress={handleSignOut}
             showChevron={false}
@@ -433,119 +433,98 @@ export default function ProfileIndex() {
           />
         </SectionGroup>
 
-        {/* ── Versión ── */}
         <Text style={styles.version}>
           Versión {Constants.expoConfig?.version ?? '—'}
         </Text>
 
-        {/* ── Eliminar cuenta (solo usuarios, no admin) ── */}
-        {!isAdmin && (
-          <Pressable onPress={handleDeleteAccount} style={styles.deleteAccountLink}>
-            <Text style={styles.deleteAccountText}>Eliminar cuenta</Text>
-          </Pressable>
-        )}
-
+        <Pressable onPress={handleDeleteAccount} style={styles.deleteAccountLink}>
+          <Text style={styles.deleteAccountText}>Eliminar cuenta</Text>
+        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f2f2f7' },
+  safe: { flex: 1, backgroundColor: colors.background },
   container: { paddingBottom: 48 },
 
   profileHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingHorizontal: 20,
-    paddingVertical: 24,
+    backgroundColor: colors.surfaceContainerLow,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing['2xl'],
     gap: 16,
+    ...shadow.sm,
   },
-  avatarWrapper: {
-    width: 64,
-    height: 64,
-  },
+  avatarWrapper: { width: 64, height: 64 },
   avatar: {
     width: 64,
     height: 64,
-    borderRadius: 32,
-    backgroundColor: '#007AFF',
+    borderRadius: radii.full,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarImage: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-  },
+  avatarImage: { width: 64, height: 64, borderRadius: radii.full },
   avatarBadge: {
     position: 'absolute',
     bottom: 0,
     right: 0,
     width: 22,
     height: 22,
-    borderRadius: 11,
-    backgroundColor: '#007AFF',
+    borderRadius: radii.full,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#fff',
+    borderColor: colors.background,
   },
-  avatarBadgeIcon: { fontSize: 10 },
-  avatarText: { color: '#fff', fontSize: 24, fontWeight: '700' },
+  avatarText: { ...typography.headlineMd, color: colors.onPrimary, fontSize: 24 },
   profileInfo: { flex: 1, gap: 2 },
-  profileName: { fontSize: 20, fontWeight: '700', color: '#111' },
-  profileEmail: { fontSize: 14, color: '#888' },
-  ownerBadge: { fontSize: 13, color: '#34C759', fontWeight: '600', marginTop: 4 },
+  profileName: { ...typography.titleLg },
+  profileEmail: { ...typography.bodyMd },
+  ownerBadge: { ...typography.titleSm, color: colors.confirmedText, marginTop: 4 },
 
   sectionLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#8e8e93',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    ...typography.labelSm,
     marginTop: 24,
     marginBottom: 6,
-    marginHorizontal: 20,
+    marginHorizontal: spacing.xl,
   },
   sectionGroup: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    borderRadius: 12,
+    backgroundColor: colors.surfaceContainerLow,
+    marginHorizontal: spacing.lg,
+    borderRadius: radii.md,
     overflow: 'hidden',
+    ...shadow.sm,
   },
 
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
     paddingVertical: 14,
   },
   rowLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
-  rowIcon: { fontSize: 18, width: 26, textAlign: 'center' },
-  rowLabel: { fontSize: 16, color: '#111' },
-  destructiveLabel: { color: '#1a3a6e' },
+  rowIcon: { width: 26, alignItems: 'center' as const },
+  rowLabel: { ...typography.titleSm, lineHeight: 18 },
+  destructiveLabel: { color: colors.error },
   rowRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  rowValue: { fontSize: 15, color: '#8e8e93' },
-  rowValueWarning: { color: '#FF9500', fontWeight: '600' },
+  rowValue: { ...typography.labelMd },
+  rowValueWarning: { color: colors.warning, fontFamily: 'Inter_600SemiBold' },
   rowChevron: {
     fontSize: 18,
-    color: '#c7c7cc',
-    fontWeight: '600',
+    color: colors.outline,
+    fontFamily: 'PlusJakartaSans_600SemiBold',
     ...Platform.select({ android: { lineHeight: 22 } }),
-  },
-  rowDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: '#e0e0e0',
-    marginLeft: 54,
   },
 
   version: {
     textAlign: 'center',
-    fontSize: 13,
-    color: '#c7c7cc',
+    ...typography.labelMd,
     marginTop: 28,
   },
   deleteAccountLink: {
@@ -554,8 +533,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   deleteAccountText: {
-    fontSize: 12,
-    color: '#c7c7cc',
+    ...typography.labelMd,
     textDecorationLine: 'underline',
   },
 });

@@ -73,7 +73,7 @@ The entire routing strategy is driven by the `AuthProvider` (`providers/AuthProv
 
 - `(auth)/` — Login + sign-up (tabs dentro de un mismo screen).
 - `(main)/` — Tab navigation for regular users: QR/reservas, nueva reserva, servicios, perfil.
-- `(screens)/` — Modal screens: checkout, success.
+- `(screens)/` — Modal screens: confirmación de pago (`booking-success`).
 - `admin/` — Tab navigation for owners: QR scanner, gestión de plazas y reservas, mapa, servicios admin, perfil.
 
 ### Key Files
@@ -81,7 +81,9 @@ The entire routing strategy is driven by the `AuthProvider` (`providers/AuthProv
 | File | Purpose |
 |------|---------|
 | `lib/supabase.ts` | Supabase client singleton (AsyncStorage session persistence) |
-| `providers/AuthProvider.tsx` | Global auth context: session, user, `isOwner`, `signOut` |
+| `lib/theme.ts` | Design tokens: colors, typography, spacing, radii, shadows |
+| `providers/AuthProvider.tsx` | Global auth context: session, user, `isOwner`, `signOut`, `refreshProfile` |
+| `providers/PendingReservationContext.tsx` | Draft reservation state shared across the 5-step booking flow |
 | `app/index.tsx` | Auth gate — redirects based on session/role |
 | `app.config.ts` | Expo config: reads `.env`, injects `extra`, configures plugins |
 | `components/utils/dates.ts` | `nightsBetween(from, to)` — calcula noches entre dos fechas |
@@ -115,13 +117,20 @@ React Native New Architecture is enabled (`newArchEnabled: true` in `app.config.
 | `/(main)/qr` | `app/(main)/qr/index.tsx` | Lista de reservas del usuario: activas, próximas, canceladas, anteriores. QR rotativo cada 45s |
 | `/(main)/qr/[reservationId]` | `app/(main)/qr/[reservationId]/index.tsx` | Detalle de reserva: vehículo, extras, desglose, acciones cancelar/modificar |
 | `/(main)/qr/[reservationId]/edit` | `app/(main)/qr/[reservationId]/edit.tsx` | Editor de modificación: noches, extras, vehículo. Calcula delta en vivo |
-| `/(main)/reservations` | `app/(main)/reservations/index.tsx` | Selector de fechas + botón para iniciar checkout (nueva reserva) |
+| `/(main)/reservations` | `app/(main)/reservations/index.tsx` | Paso 1 del flujo de reserva: selección del número de plazas |
+| `/(main)/reservations/date-picker` | `app/(main)/reservations/date-picker.tsx` | Paso 2: selector de rango de fechas con calendario paginado |
+| `/(main)/reservations/place-picker` | `app/(main)/reservations/place-picker.tsx` | Paso 3: selección de plaza concreta en el mapa interactivo |
+| `/(main)/reservations/configure-places` | `app/(main)/reservations/configure-places.tsx` | Paso 4: configuración por plaza (vehículo, viajeros, extras) |
+| `/(main)/reservations/reservation-summary` | `app/(main)/reservations/reservation-summary.tsx` | Paso 5: resumen y confirmación — llama a create-checkout-session y abre Stripe |
 | `/(main)/services` | `app/(main)/services/index.tsx` | Catálogo de servicios informativos |
 | `/(main)/services/[serviceId]` | `app/(main)/services/[serviceId].tsx` | Detalle de servicio |
-| `/(main)/profile` | `app/(main)/profile/index.tsx` | Perfil de usuario + acceso a vehículos, contraseña |
+| `/(main)/profile` | `app/(main)/profile/index.tsx` | Perfil de usuario + acceso a sub-secciones |
 | `/(main)/profile/vehicles` | `app/(main)/profile/vehicles.tsx` | CRUD de vehículos del usuario (marca, modelo, matrícula, alias, longitud) |
-| `/(screens)/checkout` | `app/(screens)/checkout.tsx` | Flujo de pago: selector de vehículo + extras + Stripe |
-| `/(screens)/success` | `app/(screens)/success.tsx` | Confirmación tras pago. Soporta `mode=modify` para modificaciones |
+| `/(main)/profile/faq` | `app/(main)/profile/faq.tsx` | Preguntas frecuentes (contenido desde cms_pages) |
+| `/(main)/profile/contact` | `app/(main)/profile/contact.tsx` | Información de contacto del área (desde cms_pages) |
+| `/(main)/profile/privacy` | `app/(main)/profile/privacy.tsx` | Política de privacidad (desde cms_pages) |
+| `/(screens)/booking-success` | `app/(screens)/booking-success.tsx` | Confirmación tras pago: polling sobre reservation_payments hasta que el webhook confirma |
+| `/stripe-redirect` | `app/stripe-redirect.tsx` | Receptor del deep link de retorno de Stripe; extrae session_id y navega a booking-success |
 | `/admin/qr` | `app/admin/qr/index.tsx` | Escáner QR para check-in (solo propietario) |
 | `/admin/places` | `app/admin/places/index.tsx` | Gestión de plazas de parking |
 | `/admin/places/reservas` | `app/admin/places/reservas.tsx` | Listado de reservas con filtros: Todas / Pagadas / Reembolsadas / Canceladas |
@@ -130,10 +139,15 @@ React Native New Architecture is enabled (`newArchEnabled: true` in `app.config.
 | `/admin/services` | `app/admin/services/index.tsx` | Listado y gestión de servicios (admin) |
 | `/admin/services/[serviceId]` | `app/admin/services/[serviceId].tsx` | Edición de un servicio existente |
 | `/admin/services/new` | `app/admin/services/new.tsx` | Creación de nuevo servicio |
+| `/admin/profile/cms-faq` | `app/admin/profile/cms-faq.tsx` | Gestión de preguntas frecuentes (CMS) |
+| `/admin/profile/cms-contact` | `app/admin/profile/cms-contact.tsx` | Gestión de información de contacto (CMS) |
+| `/admin/profile/cms-privacy` | `app/admin/profile/cms-privacy.tsx` | Gestión de política de privacidad (CMS) |
 
 **Layouts de Stack** (necesarios para que las sub-rutas no aparezcan como tabs):
 - `app/(main)/qr/_layout.tsx` — Stack para `[reservationId]` y su sub-ruta `edit`
-- `app/(main)/profile/_layout.tsx` — Stack para `vehicles`
+- `app/(main)/profile/_layout.tsx` — Stack para `vehicles`, `faq`, `contact`, `privacy`
+- `app/(main)/reservations/_layout.tsx` — Stack para los 5 pasos del flujo de reserva
+- `app/admin/places/_layout.tsx` — Stack para `reservas` y `[reservationId]`
 
 ---
 
@@ -148,6 +162,8 @@ React Native New Architecture is enabled (`newArchEnabled: true` in `app.config.
 | `SignInEmailButton` | `components/SignInEmailButton.tsx` | Botón de acceso con email |
 | `SignUpEmailButton` | `components/SignUpEmailButton.tsx` | Botón de registro con email |
 | `CalendarRangePaged` | `components/CalendarRangePaged.tsx` | Selector de rango de fechas paginado por mes (flash-calendar). Props: `minDate`, `maxDate`, `onChange({startId, endId})` |
+| `ParkingMapPicker` | `components/ParkingMapPicker.tsx` | Mapa interactivo SVG para seleccionar plazas. Muestra compatibilidad según longitud del vehículo |
+| `StepProgress` | `components/StepProgress.tsx` | Indicador de progreso para flujos multi-paso (ej: flujo de nueva reserva) |
 | `RequireAuthCard` | `components/RequireAuthCard.tsx` | Card que pide al usuario autenticarse |
 
 ### Utilidades
@@ -360,6 +376,7 @@ Devuelve array de `place_id` libres para el rango dado. Excluye reservas con `pa
 | `cancel-reservation` | JWT | Cancela reserva del usuario. Calcula tier de reembolso server-side, llama Stripe `/v1/refunds`, actualiza BD, registra en `reservation_payments`, envía email al admin via Resend |
 | `modify-reservation` | JWT | Modifica reserva antes del check-in. Tres ramas: `delta=0` → aplica directo; `delta<0` → Stripe refund + aplica; `delta>0` → crea Stripe Checkout. En rama delta<0 envía email al admin |
 | `verify-qr-pass` | JWT | Verifica token QR |
+| `verify-nfc-pass` | JWT | Verifica UID de etiqueta NFC contra tabla `nfc_tag`. En el prototipo el UID es una constante (`DEMO_TAG_UID`) |
 
 ### Política de cancelación / reembolso
 
@@ -380,10 +397,10 @@ Cuando hay cancelación o modificación con reembolso, las edge functions envía
 ## Flujos de pago
 
 ### Crear reserva
-`checkout.tsx` → `create-checkout-session` → Stripe → `stripe-success` (redirect) → `success.tsx` (polling `reservations.checkout_session_id`) → `stripe-webhook` inserta la reserva.
+`reservation-summary.tsx` → `create-checkout-session` → Stripe → `stripe-success` (redirect) → `stripe-redirect.tsx` (deep link) → `booking-success.tsx` (polling `reservation_payments.stripe_checkout_session_id`) → `stripe-webhook` inserta la reserva → navega al detalle.
 
 ### Modificar reserva (delta > 0)
-`edit.tsx` → `modify-reservation` → Stripe Checkout → `stripe-success` (redirect con `mode=modify`) → `success.tsx` (polling `reservation_payments.stripe_checkout_session_id`) → `stripe-webhook` (rama `modify`) actualiza la reserva.
+`edit.tsx` → `modify-reservation` → Stripe Checkout → `stripe-success` (redirect con `mode=modify`) → `stripe-redirect.tsx` (deep link) → navega al detalle de reserva → `stripe-webhook` (rama `modify`) actualiza la reserva.
 
 ### Modificar reserva (delta ≤ 0)
 `edit.tsx` → `modify-reservation` → aplica directo en BD (+ Stripe refund si delta < 0) → responde `{mode: 'free'|'refunded'}` → `edit.tsx` muestra Alert y vuelve al detalle.

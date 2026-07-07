@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  Pressable,
+  ActivityIndicator,
+  StyleSheet,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
@@ -9,6 +16,8 @@ import {
   emptyPlaceConfig,
 } from '@/providers/PendingReservationContext';
 import { NIGHTLY_CENTS } from '@/components/utils/money';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
+import StepProgress from '@/components/StepProgress';
 
 export default function ReservationsScreen() {
   const router = useRouter();
@@ -55,136 +64,85 @@ export default function ReservationsScreen() {
         (_, i) => prev.placeConfigs[i] ?? emptyPlaceConfig(),
       ),
     }));
-    router.push('/(screens)/configure-places');
+    router.push('/(main)/reservations/configure-places');
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FC' }}>
-      <View
-        style={{
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          paddingHorizontal: 24,
-        }}
-      >
-        <Text
-          style={{
-            fontSize: 26,
-            fontWeight: '700',
-            marginBottom: 8,
-            textAlign: 'center',
-          }}
-        >
-          ¿Cuántas plazas necesitas?
-        </Text>
-        <Text
-          style={{
-            fontSize: 14,
-            color: '#888',
-            marginBottom: 48,
-            textAlign: 'center',
-          }}
-        >
+    <SafeAreaView style={styles.safe}>
+      <StepProgress current={1} />
+      <View style={styles.body}>
+        <Text style={styles.title}>¿Cuántas plazas necesitas?</Text>
+        <Text style={styles.subtitle}>
           Cada plaza está pensada para una autocaravana o caravana.
         </Text>
 
         {loading ? (
-          <ActivityIndicator size="large" style={{ marginBottom: 48 }} />
+          <ActivityIndicator
+            size="large"
+            color={colors.primary}
+            style={{ marginBottom: 48 }}
+          />
         ) : (
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 36,
-              marginBottom: 24,
-            }}
-          >
+          <View style={styles.stepper}>
             <Pressable
               onPress={() => setNumPlaces((n) => Math.max(1, n - 1))}
               disabled={numPlaces <= 1}
-              style={({ pressed }) => ({
-                width: 56,
-                height: 56,
-                borderRadius: 28,
-                backgroundColor: numPlaces <= 1 ? '#E5E7EB' : '#111',
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: pressed ? 0.7 : 1,
-              })}
+              style={({ pressed }) => [
+                styles.stepBtn,
+                numPlaces <= 1 && styles.stepBtnDisabled,
+                { opacity: pressed ? 0.7 : 1 },
+              ]}
             >
-              <Text
-                style={{
-                  fontSize: 28,
-                  fontWeight: '700',
-                  color: numPlaces <= 1 ? '#9CA3AF' : '#fff',
-                  lineHeight: 32,
-                }}
-              >
-                −
-              </Text>
+              <Ionicons
+                name="remove"
+                size={28}
+                color={
+                  numPlaces <= 1 ? colors.onSurfaceVariant : colors.onPrimary
+                }
+              />
             </Pressable>
 
-            <Text
-              style={{
-                fontSize: 72,
-                fontWeight: '800',
-                minWidth: 90,
-                textAlign: 'center',
-              }}
-            >
-              {numPlaces}
-            </Text>
+            <Text style={styles.counter}>{numPlaces}</Text>
 
             <Pressable
-              onPress={() =>
-                setNumPlaces((n) => Math.min(maxPlaces, n + 1))
-              }
+              onPress={() => setNumPlaces((n) => Math.min(maxPlaces, n + 1))}
               disabled={numPlaces >= maxPlaces}
-              style={({ pressed }) => ({
-                width: 56,
-                height: 56,
-                borderRadius: 28,
-                backgroundColor: numPlaces >= maxPlaces ? '#E5E7EB' : '#111',
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: pressed ? 0.7 : 1,
-              })}
+              style={({ pressed }) => [
+                styles.stepBtn,
+                numPlaces >= maxPlaces && styles.stepBtnDisabled,
+                { opacity: pressed ? 0.7 : 1 },
+              ]}
             >
-              <Text
-                style={{
-                  fontSize: 28,
-                  fontWeight: '700',
-                  color: numPlaces >= maxPlaces ? '#9CA3AF' : '#fff',
-                  lineHeight: 32,
-                }}
-              >
-                +
-              </Text>
+              <Ionicons
+                name="add"
+                size={28}
+                color={
+                  numPlaces >= maxPlaces
+                    ? colors.onSurfaceVariant
+                    : colors.onPrimary
+                }
+              />
             </Pressable>
           </View>
         )}
 
-        <Text style={{ fontSize: 13, color: '#AAA', textAlign: 'center' }}>
+        <Text style={styles.maxLabel}>
           {loading
             ? 'Cargando disponibilidad…'
             : `Máximo disponible: ${maxPlaces} plaza${maxPlaces !== 1 ? 's' : ''}`}
         </Text>
       </View>
 
-      <View style={{ padding: 20 }}>
+      <View style={styles.footer}>
         <Pressable
           onPress={handleContinue}
           disabled={loading}
-          style={({ pressed }) => ({
-            backgroundColor: '#111',
-            paddingVertical: 16,
-            borderRadius: 14,
-            alignItems: 'center',
-            opacity: pressed || loading ? 0.7 : 1,
-          })}
+          style={({ pressed }) => [
+            styles.continueBtn,
+            { opacity: pressed || loading ? 0.75 : 1 },
+          ]}
         >
-          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>
+          <Text style={styles.continueBtnText}>
             Continuar con {numPlaces} plaza{numPlaces !== 1 ? 's' : ''}
           </Text>
         </Pressable>
@@ -192,3 +150,63 @@ export default function ReservationsScreen() {
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.background },
+  body: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: spacing['2xl'],
+  },
+  title: {
+    ...typography.headlineMd,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  subtitle: {
+    ...typography.bodyMd,
+    marginBottom: 48,
+    textAlign: 'center',
+  },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 36,
+    marginBottom: 24,
+  },
+  stepBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: radii.full,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.sm,
+  },
+  stepBtnDisabled: {
+    backgroundColor: colors.surfaceContainerHighest,
+  },
+  counter: {
+    ...typography.display,
+    fontSize: 72,
+    minWidth: 90,
+    textAlign: 'center',
+  },
+  maxLabel: {
+    ...typography.labelMd,
+    textAlign: 'center',
+  },
+  footer: { padding: spacing.xl },
+  continueBtn: {
+    backgroundColor: colors.primary,
+    paddingVertical: 16,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    ...shadow.sm,
+  },
+  continueBtnText: {
+    ...typography.titleMd,
+    color: colors.onPrimary,
+  },
+});

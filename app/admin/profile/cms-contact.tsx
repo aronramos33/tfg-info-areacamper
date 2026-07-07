@@ -13,62 +13,68 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { AppAlert } from '@/components/AppAlert';
-import { formatCents } from '@/components/utils/money';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
 
-export default function AdminPricing() {
+export default function AdminCmsContact() {
   const router = useRouter();
-  const [pricingId, setPricingId] = useState<number | null>(null);
-  const [savedCents, setSavedCents] = useState<number | null>(null);
-  const [value, setValue] = useState('');
+
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [whatsapp, setWhatsapp] = useState('');
+  const [savedPhone, setSavedPhone] = useState('');
+  const [savedEmail, setSavedEmail] = useState('');
+  const [savedWhatsapp, setSavedWhatsapp] = useState('');
+
   const [loading, setLoading] = useState(true);
-  const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
 
   useEffect(() => {
     void (async () => {
-      setLoading(true);
       const { data } = await supabase
-        .from('pricing')
-        .select('id, nightly_amount_cents')
-        .eq('active', true)
+        .from('cms_pages')
+        .select('content')
+        .eq('id', 'contact')
         .maybeSingle();
       if (data) {
-        setPricingId(data.id);
-        setSavedCents(data.nightly_amount_cents);
-        setValue((data.nightly_amount_cents / 100).toFixed(2).replace('.', ','));
+        const c = data.content as any;
+        const p = c.phone ?? '';
+        const e = c.email ?? '';
+        const w = c.whatsapp ?? '';
+        setPhone(p); setSavedPhone(p);
+        setEmail(e); setSavedEmail(e);
+        setWhatsapp(w); setSavedWhatsapp(w);
       }
       setLoading(false);
     })();
   }, []);
 
   const handleCancel = () => {
-    if (savedCents != null) {
-      setValue((savedCents / 100).toFixed(2).replace('.', ','));
-    }
+    setPhone(savedPhone);
+    setEmail(savedEmail);
+    setWhatsapp(savedWhatsapp);
     setIsEditing(false);
   };
 
   const handleSave = async () => {
-    if (pricingId == null) return;
-    const euros = parseFloat(value.replace(',', '.').trim());
-    if (isNaN(euros) || euros <= 0) {
-      AppAlert.alert('Valor inválido', 'Introduce un precio mayor que 0.');
+    if (!phone.trim() || !email.trim() || !whatsapp.trim()) {
+      AppAlert.alert('Campos obligatorios', 'Todos los campos son obligatorios.');
       return;
     }
-    const cents = Math.round(euros * 100);
     setSaving(true);
     try {
       const { error } = await supabase
-        .from('pricing')
-        .update({ nightly_amount_cents: cents })
-        .eq('id', pricingId);
+        .from('cms_pages')
+        .update({ content: { phone: phone.trim(), email: email.trim(), whatsapp: whatsapp.trim() } })
+        .eq('id', 'contact');
       if (error) throw error;
-      setSavedCents(cents);
+      setSavedPhone(phone.trim());
+      setSavedEmail(email.trim());
+      setSavedWhatsapp(whatsapp.trim());
       setIsEditing(false);
     } catch (e: any) {
-      AppAlert.alert('Error', e?.message ?? 'No se pudo guardar el precio.');
+      AppAlert.alert('Error', e?.message ?? 'No se pudo guardar.');
     } finally {
       setSaving(false);
     }
@@ -84,7 +90,7 @@ export default function AdminPricing() {
           <Pressable onPress={() => router.back()} hitSlop={8} style={styles.headerSide}>
             <Text style={styles.headerBack}>‹ Atrás</Text>
           </Pressable>
-          <Text style={styles.headerTitle}>Precio por noche</Text>
+          <Text style={styles.headerTitle}>¿Necesitas ayuda?</Text>
           <View style={[styles.headerSide, { alignItems: 'flex-end' }]}>
             {!loading && !isEditing && (
               <Pressable onPress={() => setIsEditing(true)} hitSlop={8} style={styles.pencilBtn}>
@@ -100,38 +106,62 @@ export default function AdminPricing() {
         >
           {!loading && (
             <>
-              <View style={styles.card}>
-                <Text style={styles.fieldLabel}>Precio por noche</Text>
+              <Text style={styles.hint}>
+                Estos datos son los que ven los usuarios en la sección de contacto.
+              </Text>
 
+              <View style={styles.card}>
+                <Text style={styles.fieldLabel}>Teléfono</Text>
                 {isEditing ? (
-                  <View style={styles.inputRow}>
-                    <TextInput
-                      value={value}
-                      onChangeText={setValue}
-                      style={styles.input}
-                      keyboardType="decimal-pad"
-                      selectTextOnFocus
-                      autoFocus
-                      placeholder="15,00"
-                      placeholderTextColor={colors.onSurfaceVariant}
-                    />
-                    <Text style={styles.currency}>€ / noche</Text>
-                  </View>
+                  <TextInput
+                    value={phone}
+                    onChangeText={setPhone}
+                    style={styles.input}
+                    keyboardType="phone-pad"
+                    autoCorrect={false}
+                    placeholder="651496228"
+                    placeholderTextColor={colors.onSurfaceVariant}
+                    autoFocus
+                  />
                 ) : (
-                  <View style={styles.readRow}>
-                    <Text style={styles.readValue}>
-                      {savedCents != null ? formatCents(savedCents) : '—'}
-                    </Text>
-                    <Text style={styles.readUnit}>por noche</Text>
-                  </View>
+                  <Text style={styles.readValue}>{savedPhone || '—'}</Text>
+                )}
+
+                <View style={styles.divider} />
+
+                <Text style={styles.fieldLabel}>Email</Text>
+                {isEditing ? (
+                  <TextInput
+                    value={email}
+                    onChangeText={setEmail}
+                    style={styles.input}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="info@areacamper.es"
+                    placeholderTextColor={colors.onSurfaceVariant}
+                  />
+                ) : (
+                  <Text style={styles.readValue}>{savedEmail || '—'}</Text>
+                )}
+
+                <View style={styles.divider} />
+
+                <Text style={styles.fieldLabel}>WhatsApp</Text>
+                {isEditing ? (
+                  <TextInput
+                    value={whatsapp}
+                    onChangeText={setWhatsapp}
+                    style={styles.input}
+                    keyboardType="phone-pad"
+                    autoCorrect={false}
+                    placeholder="651496228"
+                    placeholderTextColor={colors.onSurfaceVariant}
+                  />
+                ) : (
+                  <Text style={styles.readValue}>{savedWhatsapp || '—'}</Text>
                 )}
               </View>
-
-              {!isEditing && (
-                <Text style={styles.hint}>
-                  Este precio se aplica a todas las nuevas reservas. Los cambios no afectan a reservas ya confirmadas.
-                </Text>
-              )}
 
               {isEditing && (
                 <View style={styles.editActions}>
@@ -168,6 +198,7 @@ export default function AdminPricing() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
+
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -184,8 +215,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceContainerHigh,
     alignItems: 'center', justifyContent: 'center',
   },
+
   container: { padding: spacing.lg, paddingBottom: 40, gap: 16 },
   hint: { ...typography.bodyMd, lineHeight: 20 },
+
   card: {
     backgroundColor: colors.surfaceContainerLow,
     borderRadius: radii.lg,
@@ -193,26 +226,27 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
     ...shadow.sm,
   },
-  fieldLabel: { ...typography.labelSm, marginTop: 14, marginBottom: 10 },
-  readRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
-  readValue: {
-    fontFamily: 'PlusJakartaSans_800ExtraBold',
-    fontSize: 36,
-    color: colors.onSurface,
-    letterSpacing: -0.5,
+
+  fieldLabel: { ...typography.labelSm, marginTop: 16, marginBottom: 6 },
+  readValue: { ...typography.titleMd, color: colors.onSurface },
+
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.outlineVariant,
+    marginTop: 16,
   },
-  readUnit: { ...typography.bodyLg, color: colors.onSurfaceVariant },
-  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+
   input: {
-    flex: 1,
-    fontFamily: 'PlusJakartaSans_800ExtraBold',
-    fontSize: 36,
+    backgroundColor: colors.inputSurface,
+    borderWidth: 1,
+    borderColor: colors.outline,
+    borderRadius: radii.sm,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.select({ ios: 12, android: 10 }),
+    ...typography.bodyLg,
     color: colors.onSurface,
-    paddingVertical: 4,
-    borderBottomWidth: 2,
-    borderBottomColor: colors.primary,
   },
-  currency: { ...typography.bodyLg, color: colors.onSurfaceVariant },
+
   editActions: { flexDirection: 'row', gap: 12 },
   cancelBtn: {
     flex: 1, borderRadius: radii.md, paddingVertical: 15,

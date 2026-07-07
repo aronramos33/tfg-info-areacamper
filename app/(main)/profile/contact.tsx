@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Alert,
+  ActivityIndicator,
   Linking,
   Platform,
   Pressable,
@@ -10,9 +10,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { supabase } from '@/lib/supabase';
+import { AppAlert } from '@/components/AppAlert';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
 
-const PHONE = '651496228';
-const EMAIL = 'aronramos33@gmail.com';
+type ContactData = { phone: string; email: string; whatsapp: string };
 
 function ContactRow({
   icon,
@@ -20,18 +23,18 @@ function ContactRow({
   value,
   onPress,
 }: {
-  icon: string;
+  icon: React.ReactNode;
   label: string;
   value: string;
   onPress: () => void;
 }) {
   return (
     <Pressable
-      style={({ pressed }) => [styles.row, pressed && { backgroundColor: '#f0f0f0' }]}
+      style={({ pressed }) => [styles.row, pressed && { backgroundColor: colors.surfaceContainerHigh }]}
       onPress={onPress}
     >
       <View style={styles.rowLeft}>
-        <Text style={styles.rowIcon}>{icon}</Text>
+        <View style={styles.rowIcon}>{icon}</View>
         <View>
           <Text style={styles.rowLabel}>{label}</Text>
           <Text style={styles.rowValue}>{value}</Text>
@@ -44,23 +47,41 @@ function ContactRow({
 
 export default function ProfileContact() {
   const router = useRouter();
+  const [data, setData] = useState<ContactData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    void (async () => {
+      const { data: row } = await supabase
+        .from('cms_pages')
+        .select('content')
+        .eq('id', 'contact')
+        .maybeSingle();
+      if (row) setData(row.content as ContactData);
+      setLoading(false);
+    })();
+  }, []);
+
+  const phone = data?.phone ?? '';
+  const email = data?.email ?? '';
+  const whatsapp = data?.whatsapp ?? phone;
 
   const handlePhone = () => {
-    Linking.openURL(`tel:${PHONE}`).catch(() =>
-      Alert.alert('Error', 'No se pudo abrir la app de teléfono.'),
+    Linking.openURL(`tel:${phone}`).catch(() =>
+      AppAlert.alert('Error', 'No se pudo abrir la app de teléfono.'),
     );
   };
 
   const handleEmail = () => {
     Linking.openURL(
-      `mailto:${EMAIL}?subject=${encodeURIComponent('Consulta - Área Camper Marchuquera')}`,
-    ).catch(() => Alert.alert('Error', 'No se pudo abrir el correo.'));
+      `mailto:${email}?subject=${encodeURIComponent('Consulta - Área Camper Marchuquera')}`,
+    ).catch(() => AppAlert.alert('Error', 'No se pudo abrir el correo.'));
   };
 
   const handleWhatsApp = () => {
     const text = encodeURIComponent('Hola, necesito ayuda con mi reserva en el Área Camper Marchuquera.');
-    Linking.openURL(`https://wa.me/34${PHONE}?text=${text}`).catch(() =>
-      Alert.alert('Error', 'No se pudo abrir WhatsApp.'),
+    Linking.openURL(`https://wa.me/34${whatsapp}?text=${text}`).catch(() =>
+      AppAlert.alert('Error', 'No se pudo abrir WhatsApp.'),
     );
   };
 
@@ -74,113 +95,86 @@ export default function ProfileContact() {
         <View style={styles.headerSide} />
       </View>
 
-      <View style={styles.container}>
-        <Text style={styles.intro}>
-          Estamos aquí para ayudarte. Puedes contactar con nosotros por teléfono o email
-          en horario de 9:00 a 21:00 h.
-        </Text>
-
-        <View style={styles.card}>
-          <ContactRow
-            icon="📞"
-            label="Teléfono"
-            value={PHONE}
-            onPress={handlePhone}
-          />
-          <View style={styles.divider} />
-          <ContactRow
-            icon="✉️"
-            label="Email"
-            value={EMAIL}
-            onPress={handleEmail}
-          />
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator color={colors.primary} />
         </View>
+      ) : (
+        <View style={styles.container}>
+          <Text style={styles.intro}>
+            Estamos aquí para ayudarte. Puedes contactar con nosotros por teléfono o email
+            en horario de 9:00 a 21:00 h.
+          </Text>
 
-        <Text style={styles.sectionLabel}>FUERA DE HORARIO</Text>
-        <View style={styles.card}>
-          <ContactRow
-            icon="💬"
-            label="WhatsApp"
-            value={PHONE}
-            onPress={handleWhatsApp}
-          />
+          <View style={styles.card}>
+            <ContactRow icon={<Ionicons name="call-outline" size={20} color={colors.secondary} />} label="Teléfono" value={phone} onPress={handlePhone} />
+            <View style={styles.divider} />
+            <ContactRow icon={<Ionicons name="mail-outline" size={20} color={colors.secondary} />} label="Email" value={email} onPress={handleEmail} />
+          </View>
+
+          <Text style={styles.sectionLabel}>FUERA DE HORARIO</Text>
+          <View style={styles.card}>
+            <ContactRow icon={<Ionicons name="chatbubble-ellipses-outline" size={20} color={colors.secondary} />} label="WhatsApp" value={whatsapp} onPress={handleWhatsApp} />
+          </View>
+          <Text style={styles.note}>
+            Si estás fuera del horario de atención, puedes enviarnos un mensaje de WhatsApp
+            y te responderemos lo antes posible.
+          </Text>
         </View>
-        <Text style={styles.note}>
-          Si estás fuera del horario de atención, puedes enviarnos un mensaje de WhatsApp
-          y te responderemos lo antes posible.
-        </Text>
-      </View>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f2f2f7' },
+  safe: { flex: 1, backgroundColor: colors.background },
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
     paddingVertical: 12,
-    backgroundColor: '#fff',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e0e0e0',
+    backgroundColor: colors.background,
   },
   headerSide: { width: 70 },
-  headerBack: { color: '#007AFF', fontSize: 16 },
-  headerTitle: { fontSize: 17, fontWeight: '600', color: '#111' },
+  headerBack: { ...typography.titleMd, color: colors.secondary },
+  headerTitle: { ...typography.titleLg },
 
-  container: { padding: 16, gap: 12 },
+  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  container: { padding: spacing.lg, gap: 12 },
 
-  intro: {
-    fontSize: 15,
-    color: '#555',
-    lineHeight: 22,
-    marginBottom: 4,
-  },
+  intro: { ...typography.bodyLg, lineHeight: 22, marginBottom: 4 },
 
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.lg,
     overflow: 'hidden',
+    ...shadow.sm,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
     paddingVertical: 14,
   },
   rowLeft: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  rowIcon: { fontSize: 20, width: 28, textAlign: 'center' },
-  rowLabel: { fontSize: 12, color: '#888', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4 },
-  rowValue: { fontSize: 16, color: '#007AFF', fontWeight: '500', marginTop: 2 },
+  rowIcon: { width: 28, alignItems: 'center' as const },
+  rowLabel: { ...typography.labelSm, lineHeight: 16, marginBottom: 2 },
+  rowValue: { ...typography.titleSm, color: colors.secondary, lineHeight: 18, marginTop: 2 },
   rowChevron: {
     fontSize: 18,
-    color: '#c7c7cc',
-    fontWeight: '600',
+    color: colors.onSurfaceVariant,
+    fontFamily: 'PlusJakartaSans_700Bold',
     ...Platform.select({ android: { lineHeight: 22 } }),
   },
   divider: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#e0e0e0',
+    backgroundColor: colors.outlineVariant,
     marginLeft: 58,
   },
 
-  sectionLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#8e8e93',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    marginTop: 4,
-    marginLeft: 4,
-  },
-  note: {
-    fontSize: 13,
-    color: '#aaa',
-    lineHeight: 19,
-    marginTop: 2,
-  },
+  sectionLabel: { ...typography.labelSm, marginTop: 4, marginLeft: 4 },
+  note: { ...typography.bodyMd, lineHeight: 19, marginTop: 2 },
 });

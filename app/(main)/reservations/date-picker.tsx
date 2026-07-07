@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View, Text, Pressable, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  Pressable,
+  ActivityIndicator,
+  StyleSheet,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import dayjs from 'dayjs';
@@ -9,6 +15,8 @@ import { formatCents } from '@/components/utils/money';
 import { usePendingReservation } from '@/providers/PendingReservationContext';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
+import StepProgress from '@/components/StepProgress';
 
 const MONTHS_WINDOW = 12;
 
@@ -19,8 +27,15 @@ type ActiveReservation = {
   user_id: string;
 };
 
+type MaintenanceBlock = {
+  place_id: number;
+  starts_on: string;
+  ends_on: string;
+};
+
 function computeDisabledDates(
   reservations: ActiveReservation[],
+  maintenanceBlocks: MaintenanceBlock[],
   totalPlaces: number,
   numPlaces: number,
   userId: string | undefined,
@@ -41,6 +56,10 @@ function computeDisabledDates(
         occupiedCount += r.num_places;
         if (userId && r.user_id === userId) userHasReservation = true;
       }
+    }
+
+    for (const b of maintenanceBlocks) {
+      if (b.starts_on <= d && b.ends_on > d) occupiedCount += 1;
     }
 
     const freePlaces = totalPlaces - occupiedCount;
@@ -76,7 +95,7 @@ export default function DatePickerScreen() {
       .format('YYYY-MM-DD');
 
     async function load() {
-      const [placesRes, reservationsRes] = await Promise.all([
+      const [placesRes, reservationsRes, maintenanceRes] = await Promise.all([
         supabase
           .from('places')
           .select('id', { count: 'exact', head: true })
@@ -88,14 +107,21 @@ export default function DatePickerScreen() {
           .eq('payment_status', 'paid')
           .lt('start_date', windowEndStr)
           .gt('end_date', todayStr),
+        supabase
+          .from('maintenance_blocks')
+          .select('place_id, starts_on, ends_on')
+          .lt('starts_on', windowEndStr)
+          .gt('ends_on', todayStr),
       ]);
 
       const totalPlaces = placesRes.count ?? 0;
       const allReservations = (reservationsRes.data ?? []) as ActiveReservation[];
+      const allBlocks = (maintenanceRes.data ?? []) as MaintenanceBlock[];
 
       setDisabledDates(
         computeDisabledDates(
           allReservations,
+          allBlocks,
           totalPlaces,
           pending.numPlaces,
           session?.user.id,
@@ -115,26 +141,29 @@ export default function DatePickerScreen() {
       startDate: startId!,
       endDate: endId!,
     }));
-    router.push('/(screens)/place-picker');
+    router.push('/(main)/reservations/place-picker');
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FC' }}>
-      <View style={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8 }}>
-        <Text style={{ fontSize: 22, fontWeight: '700', marginBottom: 2 }}>
-          Seleccionar fechas
-        </Text>
-        <Text style={{ fontSize: 13, color: '#888' }}>
-          {pending.numPlaces} plaza{pending.numPlaces !== 1 ? 's' : ''} · Solo se muestran fechas con disponibilidad suficiente.
+    <SafeAreaView style={styles.safe}>
+      <StepProgress current={3} />
+      <View style={styles.header}>
+        <Pressable onPress={() => router.back()} style={{ paddingVertical: 4, alignSelf: 'flex-start' }}>
+          <Text style={{ ...typography.titleSm, color: colors.secondary }}>‹ Volver</Text>
+        </Pressable>
+        <Text style={[styles.title, { marginTop: 4 }]}>Seleccionar fechas</Text>
+        <Text style={styles.subtitle}>
+          {pending.numPlaces} plaza{pending.numPlaces !== 1 ? 's' : ''} · Solo
+          se muestran fechas con disponibilidad suficiente.
         </Text>
       </View>
 
       {loading ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator size="large" />
+        <View style={styles.loader}>
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : (
-        <View style={{ flex: 1, paddingHorizontal: 16 }}>
+        <View style={styles.calendar}>
           <CalendarRangePaged
             monthsWindow={MONTHS_WINDOW}
             disabledDates={disabledDates}
@@ -146,9 +175,9 @@ export default function DatePickerScreen() {
         </View>
       )}
 
-      <View style={{ padding: 20, gap: 8 }}>
+      <View style={styles.footer}>
         {canContinue && (
-          <Text style={{ fontSize: 13, color: '#555', textAlign: 'center' }}>
+          <Text style={styles.nightsHint}>
             {nights} noche{nights !== 1 ? 's' : ''} · Base estimada:{' '}
             {formatCents(estimatedTotal)}
           </Text>
@@ -156,19 +185,38 @@ export default function DatePickerScreen() {
         <Pressable
           onPress={handleContinue}
           disabled={!canContinue || loading}
-          style={({ pressed }) => ({
-            backgroundColor: '#111',
-            paddingVertical: 16,
-            borderRadius: 14,
-            alignItems: 'center',
-            opacity: !canContinue || loading || pressed ? 0.4 : 1,
-          })}
+          style={({ pressed }) => [
+            styles.btn,
+            (!canContinue || loading || pressed) && styles.btnDisabled,
+          ]}
         >
-          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>
-            Elegir plazas concretas →
-          </Text>
+          <Text style={styles.btnText}>Elegir plazas concretas →</Text>
         </Pressable>
       </View>
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.background },
+  header: {
+    paddingHorizontal: spacing['2xl'],
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.sm,
+  },
+  title: { ...typography.headlineMd, marginBottom: spacing.xs },
+  subtitle: { ...typography.bodyMd },
+  loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  calendar: { flex: 1, paddingHorizontal: spacing.lg },
+  footer: { padding: spacing['2xl'], gap: spacing.sm },
+  nightsHint: { ...typography.bodyMd, textAlign: 'center' },
+  btn: {
+    backgroundColor: colors.primary,
+    paddingVertical: 16,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    ...shadow.sm,
+  },
+  btnDisabled: { opacity: 0.4 },
+  btnText: { ...typography.titleMd, color: colors.onPrimary },
+});

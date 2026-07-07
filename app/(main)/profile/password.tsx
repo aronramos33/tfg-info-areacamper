@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -14,6 +13,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/providers/AuthProvider';
 import { supabase } from '@/lib/supabase';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
+import { AppAlert } from '@/components/AppAlert';
 
 export default function ProfilePassword() {
   const { session } = useAuth();
@@ -36,22 +37,22 @@ export default function ProfilePassword() {
     const p1 = newPassword.trim();
     const p2 = repeatPassword.trim();
     if (p1.length < 8) {
-      Alert.alert('Contraseña débil', 'Usa al menos 8 caracteres.');
+      AppAlert.alert('Contraseña débil', 'Usa al menos 8 caracteres.');
       return;
     }
     if (p1 !== p2) {
-      Alert.alert('No coincide', 'Las contraseñas no coinciden.');
+      AppAlert.alert('No coincide', 'Las contraseñas no coinciden.');
       return;
     }
     setSaving(true);
     try {
       const { error } = await supabase.auth.updateUser({ password: p1 });
       if (error) throw error;
-      Alert.alert('Listo', 'Tu contraseña se ha cambiado correctamente.', [
+      AppAlert.alert('Listo', 'Tu contraseña se ha cambiado correctamente.', [
         { text: 'OK', onPress: () => router.back() },
       ]);
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'No se pudo cambiar la contraseña.');
+      AppAlert.alert('Error', e?.message ?? 'No se pudo cambiar la contraseña.');
     } finally {
       setSaving(false);
     }
@@ -83,6 +84,7 @@ export default function ProfilePassword() {
                   value={newPassword}
                   onChangeText={setNewPassword}
                   placeholder="Mínimo 8 caracteres"
+                  placeholderTextColor={colors.onSurfaceVariant}
                   style={styles.input}
                   secureTextEntry
                   autoCapitalize="none"
@@ -93,6 +95,7 @@ export default function ProfilePassword() {
                   value={repeatPassword}
                   onChangeText={setRepeatPassword}
                   placeholder="Repite la nueva contraseña"
+                  placeholderTextColor={colors.onSurfaceVariant}
                   style={styles.input}
                   secureTextEntry
                   autoCapitalize="none"
@@ -128,53 +131,51 @@ export default function ProfilePassword() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f2f2f7' },
+  safe: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
     paddingVertical: 12,
-    backgroundColor: '#fff',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e0e0e0',
+    backgroundColor: colors.background,
   },
   headerSide: { width: 70 },
-  headerBack: { color: '#007AFF', fontSize: 16 },
-  headerTitle: { fontSize: 17, fontWeight: '600', color: '#111' },
-  container: { padding: 20, paddingBottom: 40, gap: 16 },
+  headerBack: { ...typography.titleMd, color: colors.secondary },
+  headerTitle: { ...typography.titleLg },
+  container: { padding: spacing.lg, paddingBottom: 40, gap: 16 },
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingHorizontal: 16,
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.lg,
+    paddingHorizontal: spacing.lg,
     overflow: 'hidden',
+    ...shadow.sm,
   },
-  fieldLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#888',
-    marginTop: 14,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
+  fieldLabel: { ...typography.labelSm, marginTop: 14 },
   divider: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#e0e0e0',
+    backgroundColor: colors.outlineVariant,
     marginTop: 4,
   },
   input: {
-    fontSize: 16,
+    ...typography.bodyLg,
     paddingVertical: Platform.select({ ios: 10, android: 8 }),
-    color: '#111',
+    color: colors.onSurface,
   },
   saveBtn: {
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
+    backgroundColor: colors.primary,
+    borderRadius: radii.md,
     paddingVertical: 15,
     alignItems: 'center',
+    ...shadow.sm,
   },
-  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  infoCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16 },
-  infoText: { fontSize: 15, color: '#555', lineHeight: 22 },
+  saveBtnText: { ...typography.titleMd, color: colors.onPrimary },
+  infoCard: {
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    ...shadow.sm,
+  },
+  infoText: { ...typography.bodyLg, lineHeight: 22 },
 });

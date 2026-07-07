@@ -5,7 +5,7 @@ export default function ScreenLayout() {
     <Stack
       screenOptions={{
         headerShown: false,
-        presentation: 'modal', // o "card"
+        presentation: 'card',
       }}
     />
   );

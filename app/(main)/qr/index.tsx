@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   View,
   Text,
@@ -15,10 +21,12 @@ import {
 } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import dayjs from 'dayjs';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/AuthProvider';
 import RequireAuthCard from '@/components/RequireAuthCard';
 import NfcAccessModal from '@/components/NfcAccessModal';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
 
 type Reservation = {
   id: number;
@@ -50,10 +58,10 @@ export default function QrScreen() {
   const [selectedId, setSelectedId] = useState<number | null>(
     params.reservation_id ? Number(params.reservation_id) : null,
   );
-  // Ref para acceder al valor actual de selectedId dentro del callback estable
-  // de useFocusEffect sin que sea una dependencia que lo reinvoque.
   const selectedIdRef = useRef(selectedId);
-  useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showPast, setShowPast] = useState(false);
   const [showCancelled, setShowCancelled] = useState(false);
@@ -62,11 +70,8 @@ export default function QrScreen() {
   const [qrPass, setQrPass] = useState<string>('');
   const [placeNames, setPlaceNames] = useState<string[]>([]);
 
-  // “ahora” estable (para evitar warnings/hooks)
   const now = useMemo(() => dayjs(), []);
 
-  // useFocusEffect recarga la lista cada vez que la pantalla gana foco:
-  // cubre el caso de volver desde el detalle tras cancelar/modificar una reserva.
   useFocusEffect(
     useCallback(() => {
       let alive = true;
@@ -106,8 +111,6 @@ export default function QrScreen() {
         const rows = (data ?? []) as Reservation[];
         setReservations(rows);
 
-        // Auto-selección solo si no hay ninguna reserva seleccionada aún.
-        // Usamos el ref para leer el valor actual sin que sea dep del callback.
         if (!selectedIdRef.current && rows.length > 0) {
           const active = rows.find((r) => {
             const s = dayjs(r.start_date);
@@ -131,7 +134,7 @@ export default function QrScreen() {
       return () => {
         alive = false;
       };
-    }, []) // deps vacías: el callback es estable; selectedId se lee por ref
+    }, []),
   );
 
   useEffect(() => {
@@ -150,7 +153,6 @@ export default function QrScreen() {
     const cancelled: Reservation[] = [];
 
     for (const r of reservations) {
-      // ✅ Cancelada va a su propia sección sin importar la fecha
       if (r.status === 'cancelled') {
         cancelled.push(r);
         continue;
@@ -158,7 +160,6 @@ export default function QrScreen() {
 
       const s = dayjs(r.start_date);
       const e = dayjs(r.end_date).endOf('day');
-
       const isInDateWindow = dayjs().isAfter(s) && dayjs().isBefore(e);
       const isPast = e.isBefore(dayjs());
       const isPaid = r.payment_status === 'paid';
@@ -167,14 +168,10 @@ export default function QrScreen() {
         past.push(r);
         continue;
       }
-
-      // ✅ Activas SOLO si está en fechas Y pagada
       if (isInDateWindow && isPaid) {
         active.push(r);
         continue;
       }
-
-      // ✅ Todo lo demás que no sea pasado va a próximas
       upcoming.push(r);
     }
 
@@ -187,7 +184,6 @@ export default function QrScreen() {
     past.sort(
       (a, b) => dayjs(b.start_date).valueOf() - dayjs(a.start_date).valueOf(),
     );
-    // Canceladas ordenadas por fecha de cancelación (más recientes primero), fallback a start_date
     cancelled.sort((a, b) => {
       const da = a.cancelled_at
         ? dayjs(a.cancelled_at).valueOf()
@@ -201,134 +197,139 @@ export default function QrScreen() {
     return { active, upcoming, past, cancelled };
   }, [reservations]);
 
-  // ✅ NUEVO: si no hay nada en ninguna lista, mostramos estado vacío con CTA
   const hasAnyReservations =
     active.length > 0 ||
     upcoming.length > 0 ||
     past.length > 0 ||
     cancelled.length > 0;
 
+  const CHECKIN_HOUR = 14;
+  const CHECKOUT_HOUR = 12;
+
   const qrAvailability = useMemo(() => {
     if (!selected)
       return { canShow: false, message: 'Selecciona una reserva.' };
-
     if (selected.payment_status !== 'paid') {
       return {
         canShow: false,
         message: 'El QR estará disponible cuando el pago esté confirmado.',
       };
     }
-
-    const start = dayjs(selected.start_date);
-    const end = dayjs(selected.end_date).endOf('day');
-
-    // Ventana: desde 2h antes del inicio hasta fin de estancia (o access_expires_at si existe)
-    const windowStart = start.subtract(2, 'hour');
+    const windowStart = dayjs(selected.start_date)
+      .hour(CHECKIN_HOUR)
+      .minute(0)
+      .second(0)
+      .millisecond(0);
     const windowEnd = selected.access_expires_at
       ? dayjs(selected.access_expires_at)
-      : end;
-
+      : dayjs(selected.end_date)
+          .hour(CHECKOUT_HOUR)
+          .minute(0)
+          .second(0)
+          .millisecond(0);
     if (dayjs().isBefore(windowStart)) {
       return {
         canShow: false,
-        message: `El QR estará disponible a partir de ${windowStart.format(
-          'DD/MM/YYYY HH:mm',
-        )}.`,
+        message: `El QR estará disponible a partir de las ${windowStart.format('HH:mm')} del ${windowStart.format('DD/MM/YYYY')}.`,
       };
     }
     if (dayjs().isAfter(windowEnd)) {
       return { canShow: false, message: 'Este QR ya no está disponible.' };
     }
-
     return { canShow: true, message: '' };
   }, [selected]);
 
   useEffect(() => {
     const ids = selected?.place_ids;
-    if (!ids?.length) { setPlaceNames([]); return; }
-    supabase.from('places').select('id, name').in('id', ids).then(({ data }) => {
-      if (!data) return;
-      const map: Record<number, string> = {};
-      for (const p of data) map[p.id as number] = p.name as string;
-      setPlaceNames(ids.map((id) => map[id] ?? `#${id}`));
-    });
+    if (!ids?.length) {
+      setPlaceNames([]);
+      return;
+    }
+    supabase
+      .from('places')
+      .select('id, name')
+      .in('id', ids)
+      .then(({ data }) => {
+        if (!data) return;
+        const map: Record<number, string> = {};
+        for (const p of data) map[p.id as number] = p.name as string;
+        setPlaceNames(ids.map((id) => map[id] ?? `#${id}`));
+      });
   }, [selected?.id]);
 
-  // refresco automático del token QR (cada 45s)
   useEffect(() => {
-    // Limpieza si no hay reserva o no se debe mostrar
     if (!selected?.id || !qrAvailability.canShow) {
       setQrPass('');
       return;
     }
-
     let cancelled = false;
     const REFRESH_MS = 45_000;
-
     const refresh = async () => {
       const { data, error } = await supabase.functions.invoke('issue-qr-pass', {
         body: { reservation_id: selected.id },
       });
-
       if (cancelled) return;
-
       if (error) {
         setQrPass('');
         return;
       }
-
-      const pass = String(data?.qr_pass ?? '');
-      setQrPass(pass);
+      setQrPass(String(data?.qr_pass ?? ''));
     };
-
     refresh();
     const t = setInterval(refresh, REFRESH_MS);
-
     return () => {
       cancelled = true;
       clearInterval(t);
     };
   }, [selected?.id, qrAvailability.canShow]);
 
-  // ✅ QR ahora usa qr_pass rotativo
   const qrValue = useMemo(() => {
     if (!selected?.id || !qrPass) return '';
-    return JSON.stringify({
-      reservation_id: selected.id,
-      qr_pass: qrPass,
-    });
+    return JSON.stringify({ reservation_id: selected.id, qr_pass: qrPass });
   }, [selected?.id, qrPass]);
 
   const ReservationItem = ({ r }: { r: Reservation }) => {
     const isSelected = r.id === selectedId;
-    const cancelled = r.status === 'cancelled';
-    const wasModified = !!r.modified_at && !cancelled;
+    const isCancelled = r.status === 'cancelled';
+    const wasModified = !!r.modified_at && !isCancelled;
 
     return (
       <Pressable
         onPress={() =>
-          isSelected
-            ? router.push(`/(main)/qr/${r.id}`)
-            : setSelectedId(r.id)
+          isSelected ? router.push(`/(main)/qr/${r.id}`) : setSelectedId(r.id)
         }
         style={[styles.item, isSelected && styles.itemActive]}
       >
         <View style={styles.itemHeader}>
-          <Text style={styles.itemTitle}>
+          <Text
+            style={[styles.itemTitle, isSelected && styles.itemTitleActive]}
+          >
             {formatDate(r.start_date)} → {formatDate(r.end_date)}
           </Text>
           <Text style={styles.itemChevron}>›</Text>
         </View>
-        {(cancelled || wasModified) && (
+        {(isCancelled || wasModified) && (
           <View style={styles.badgeRow}>
-            {cancelled && (
-              <View style={[styles.badge, styles.badgeCancelled]}>
-                <Text style={styles.badgeText}>Cancelada</Text>
+            {isCancelled && (
+              <View
+                style={[styles.badge, { backgroundColor: colors.cancelledBg }]}
+              >
+                <Text
+                  style={[styles.badgeText, { color: colors.cancelledText }]}
+                >
+                  Cancelada
+                </Text>
               </View>
             )}
             {wasModified && (
-              <View style={[styles.badge, styles.badgeModified]}>
-                <Text style={styles.badgeText}>Modificada</Text>
+              <View
+                style={[styles.badge, { backgroundColor: colors.modifiedBg }]}
+              >
+                <Text
+                  style={[styles.badgeText, { color: colors.modifiedText }]}
+                >
+                  Modificada
+                </Text>
               </View>
             )}
           </View>
@@ -349,7 +350,7 @@ export default function QrScreen() {
     return (
       <SafeAreaView style={[styles.safe, { paddingTop: insets.top }]}>
         <View style={styles.center}>
-          <ActivityIndicator />
+          <ActivityIndicator color={colors.primary} />
           <Text style={styles.subtle}>Cargando…</Text>
         </View>
       </SafeAreaView>
@@ -362,12 +363,11 @@ export default function QrScreen() {
         <View style={styles.center}>
           <Text style={styles.title}>Acceso</Text>
           <Text style={[styles.subtle, { marginTop: 10 }]}>{errorMsg}</Text>
-
           <Pressable
             onPress={() => router.push('/search')}
             style={({ pressed }) => [
               styles.newReservationBtn,
-              pressed && styles.newReservationBtnPressed,
+              pressed && { opacity: 0.75 },
             ]}
           >
             <Text style={styles.newReservationBtnText}>+ Nueva reserva</Text>
@@ -377,10 +377,9 @@ export default function QrScreen() {
     );
   }
 
-  // ✅ Estado vacío: no hay reservas en ninguna categoría
   if (!hasAnyReservations) {
     return (
-      <SafeAreaView style={[styles.safe]}>
+      <SafeAreaView style={styles.safe}>
         <ScrollView
           contentContainerStyle={[
             styles.container,
@@ -389,7 +388,6 @@ export default function QrScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.title}>Acceso</Text>
-
           <View style={[styles.card, { marginTop: 8 }]}>
             <Text style={[styles.cardTitle, { textAlign: 'center' }]}>
               No tienes reservas actualmente
@@ -401,14 +399,12 @@ export default function QrScreen() {
               acceso.
             </Text>
           </View>
-
           <View style={{ flex: 1 }} />
-
           <Pressable
             onPress={() => router.push('/reservations')}
             style={({ pressed }) => [
               styles.newReservationBtn,
-              pressed && styles.newReservationBtnPressed,
+              pressed && { opacity: 0.75 },
             ]}
           >
             <Text style={styles.newReservationBtnText}>+ Nueva reserva</Text>
@@ -419,7 +415,7 @@ export default function QrScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.safe]}>
+    <SafeAreaView style={styles.safe}>
       <ScrollView
         contentContainerStyle={[
           styles.container,
@@ -429,7 +425,6 @@ export default function QrScreen() {
       >
         <Text style={styles.title}>Acceso</Text>
 
-        {/* Tarjeta QR */}
         <View style={styles.card}>
           {!selected ? (
             <Text style={styles.subtle}>No hay reservas.</Text>
@@ -438,29 +433,51 @@ export default function QrScreen() {
               <View style={styles.infoRow}>
                 <View style={styles.infoCell}>
                   <Text style={styles.infoLabel}>Entrada</Text>
-                  <Text style={styles.infoValue}>{formatDate(selected.start_date)}</Text>
+                  <Text style={styles.infoValue}>
+                    {formatDate(selected.start_date)}
+                  </Text>
                 </View>
                 <View style={styles.infoDivider} />
                 <View style={styles.infoCell}>
                   <Text style={styles.infoLabel}>Salida</Text>
-                  <Text style={styles.infoValue}>{formatDate(selected.end_date)}</Text>
+                  <Text style={styles.infoValue}>
+                    {formatDate(selected.end_date)}
+                  </Text>
                 </View>
               </View>
 
               <View style={{ marginTop: 14, alignItems: 'center' }}>
                 {qrAvailability.canShow && qrValue ? (
                   <>
-                    <QRCode value={qrValue} size={220} />
-                    <Text style={[styles.subtle, { marginTop: 10, textAlign: 'center' }]}>
+                    <View style={styles.qrWrapper}>
+                      <QRCode
+                        value={qrValue}
+                        size={200}
+                        backgroundColor={colors.background}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.subtle,
+                        { marginTop: 10, textAlign: 'center' },
+                      ]}
+                    >
                       Muestra este QR en el acceso.
                     </Text>
                   </>
                 ) : (
                   <>
                     <View style={styles.qrPlaceholder}>
-                      <Text style={styles.qrPlaceholderText}>QR no disponible</Text>
+                      <Text style={styles.qrPlaceholderText}>
+                        QR no disponible
+                      </Text>
                     </View>
-                    <Text style={[styles.subtle, { marginTop: 10, textAlign: 'center' }]}>
+                    <Text
+                      style={[
+                        styles.subtle,
+                        { marginTop: 10, textAlign: 'center' },
+                      ]}
+                    >
                       {qrAvailability.message}
                     </Text>
                   </>
@@ -471,16 +488,22 @@ export default function QrScreen() {
                     <Text style={styles.plazasLabel}>
                       {placeNames.length > 1 ? 'Plazas' : 'Plaza'}
                     </Text>
-                    <Text style={styles.plazasValue}>{placeNames.join(' · ')}</Text>
+                    <Text style={styles.plazasValue}>
+                      {placeNames.join(' · ')}
+                    </Text>
                   </View>
                 )}
 
                 {qrAvailability.canShow && qrValue && (
                   <Pressable
                     onPress={() => setNfcVisible(true)}
-                    style={({ pressed }) => [styles.nfcBtn, pressed && { opacity: 0.7 }]}
+                    style={({ pressed }) => [
+                      styles.nfcBtn,
+                      pressed && { opacity: 0.75 },
+                    ]}
                   >
-                    <Text style={styles.nfcBtnText}>📡 Acceso por NFC</Text>
+                    <Ionicons name="radio-outline" size={16} color={colors.secondary} />
+                    <Text style={styles.nfcBtnText}>Acceso por NFC</Text>
                   </Pressable>
                 )}
               </View>
@@ -488,7 +511,6 @@ export default function QrScreen() {
           )}
         </View>
 
-        {/* Activas (solo si hay) */}
         {active.length > 0 && (
           <>
             <Text style={styles.section}>Activas</Text>
@@ -500,7 +522,6 @@ export default function QrScreen() {
           </>
         )}
 
-        {/* Próximas (solo si hay) */}
         {upcoming.length > 0 && (
           <>
             <Text style={styles.section}>Próximas</Text>
@@ -512,7 +533,6 @@ export default function QrScreen() {
           </>
         )}
 
-        {/* Canceladas (solo si hay) */}
         {cancelled.length > 0 && (
           <>
             <Pressable
@@ -524,18 +544,16 @@ export default function QrScreen() {
                 {showCancelled ? 'Ocultar' : 'Mostrar'}
               </Text>
             </Pressable>
-
-            {showCancelled ? (
+            {showCancelled && (
               <View style={styles.listCard}>
                 {cancelled.map((r) => (
                   <ReservationItem key={r.id} r={r} />
                 ))}
               </View>
-            ) : null}
+            )}
           </>
         )}
 
-        {/* Anteriores (solo si hay) */}
         {past.length > 0 && (
           <>
             <Pressable
@@ -547,14 +565,13 @@ export default function QrScreen() {
                 {showPast ? 'Ocultar' : 'Mostrar'}
               </Text>
             </Pressable>
-
-            {showPast ? (
+            {showPast && (
               <View style={styles.listCard}>
                 {past.map((r) => (
                   <ReservationItem key={r.id} r={r} />
                 ))}
               </View>
-            ) : null}
+            )}
           </>
         )}
 
@@ -562,7 +579,7 @@ export default function QrScreen() {
           onPress={() => router.push('/reservations')}
           style={({ pressed }) => [
             styles.newReservationBtn,
-            pressed && styles.newReservationBtnPressed,
+            pressed && { opacity: 0.75 },
           ]}
         >
           <Text style={styles.newReservationBtnText}>+ Nueva reserva</Text>
@@ -579,7 +596,7 @@ export default function QrScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#F7F8FB' },
+  safe: { flex: 1, backgroundColor: colors.background },
   container: { padding: 18 },
   center: {
     flex: 1,
@@ -587,140 +604,124 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
-  title: {
-    fontSize: 26,
-    fontWeight: '800',
-    marginBottom: 14,
-    textAlign: 'center',
-  },
 
-  subtle: { color: '#666', marginTop: 4 },
+  title: { ...typography.headlineLg, marginBottom: 14, textAlign: 'center' },
+  subtle: { ...typography.bodyMd, marginTop: 4 },
 
   card: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 16,
-    elevation: 2,
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.xl,
+    padding: spacing.lg,
+    ...shadow.sm,
+    marginBottom: spacing.md,
   },
-  cardTitle: { fontSize: 16, fontWeight: '800' },
-  cardSub: { marginTop: 6, color: '#666' },
+  cardTitle: { ...typography.titleMd },
 
   sectionRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
     justifyContent: 'space-between',
   },
-  section: { marginTop: 18, marginBottom: 10, fontSize: 16, fontWeight: '800' },
-  sectionToggle: { color: '#007AFF', fontWeight: '800' },
-
-  listCard: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 8,
-    elevation: 1,
+  section: {
+    marginTop: 18,
+    marginBottom: 10,
+    ...typography.titleMd,
+  },
+  sectionToggle: {
+    ...typography.titleSm,
+    color: colors.secondary,
   },
 
-  item: { paddingVertical: 12, paddingHorizontal: 12, borderRadius: 12 },
-  itemActive: { backgroundColor: '#EEF4FF' },
+  listCard: {
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.lg,
+    padding: 8,
+    ...shadow.sm,
+  },
+
+  item: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: radii.md,
+  },
+  itemActive: {
+    backgroundColor: colors.surfaceContainerHigh,
+  },
   itemHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  itemTitle: { fontWeight: '800' },
-  itemSub: { color: '#666', marginTop: 4 },
-  itemChevron: { color: '#999', fontSize: 20, fontWeight: '700' },
+  itemTitle: { ...typography.titleSm, color: colors.onSurfaceVariant },
+  itemTitleActive: { color: colors.onSurface },
+  itemChevron: { color: colors.onSurfaceVariant, fontSize: 20 },
   badgeRow: { flexDirection: 'row', gap: 6, marginTop: 8 },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 999,
-  },
-  badgeCancelled: { backgroundColor: '#fdecea' },
-  badgeModified: { backgroundColor: '#e3f2fd' },
-  badgeText: { fontSize: 11, fontWeight: '700', color: '#333' },
+  badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: radii.full },
+  badgeText: { ...typography.labelSm, letterSpacing: 0 },
 
+  qrWrapper: {
+    padding: 16,
+    backgroundColor: colors.background,
+    borderRadius: radii.lg,
+  },
   qrPlaceholder: {
     width: 220,
     height: 220,
-    borderRadius: 14,
-    borderWidth: 2,
+    borderRadius: radii.md,
+    borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: '#bbb',
+    borderColor: colors.outline,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  qrPlaceholderText: { color: '#777', fontWeight: '800' },
+  qrPlaceholderText: { ...typography.titleSm, color: colors.onSurfaceVariant },
 
-  linkBtn: { marginTop: 18, alignItems: 'center', paddingVertical: 12 },
-  linkText: { color: '#007AFF', fontWeight: '800', fontSize: 16 },
-  payBtn: {
-    marginTop: 8,
-    backgroundColor: '#1A73E8',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    alignSelf: 'flex-start',
-  },
-  payBtnText: {
-    color: 'white',
-    fontWeight: '700',
-    fontSize: 13,
-  },
   newReservationBtn: {
     marginTop: 24,
-    backgroundColor: '#007AFF',
+    backgroundColor: colors.primary,
     paddingVertical: 16,
     paddingHorizontal: 40,
-    borderRadius: 16,
+    borderRadius: radii.lg,
     alignItems: 'center',
-    shadowColor: '#007AFF',
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
-  },
-  newReservationBtnPressed: {
-    backgroundColor: '#0062CC',
+    ...shadow.md,
   },
   newReservationBtnText: {
-    color: 'white',
-    fontSize: 17,
-    fontWeight: '800',
-    letterSpacing: 0.3,
+    ...typography.titleMd,
+    color: colors.onPrimary,
   },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 4,
-  },
+
+  infoRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 4 },
   infoCell: { flex: 1, alignItems: 'center' },
-  infoLabel: { fontSize: 11, fontWeight: '600', color: '#999', textTransform: 'uppercase', letterSpacing: 0.4 },
-  infoValue: { fontSize: 14, fontWeight: '700', color: '#111', marginTop: 2 },
-  infoDivider: { width: 1, backgroundColor: '#eee', alignSelf: 'stretch', marginHorizontal: 4 },
+  infoLabel: { ...typography.labelSm },
+  infoValue: { ...typography.titleMd, marginTop: 2 },
+  infoDivider: {
+    width: 1,
+    backgroundColor: colors.outlineVariant,
+    alignSelf: 'stretch',
+    marginHorizontal: 4,
+  },
 
   plazasBadge: {
     marginTop: 16,
     paddingVertical: 10,
     paddingHorizontal: 20,
-    borderRadius: 12,
-    backgroundColor: '#EEF4FF',
-    borderWidth: 1.5,
-    borderColor: '#1A73E8',
+    borderRadius: radii.md,
+    backgroundColor: colors.surfaceContainerHigh,
     alignItems: 'center',
     minWidth: 160,
   },
-  plazasLabel: { fontSize: 11, fontWeight: '700', color: '#1A73E8', textTransform: 'uppercase', letterSpacing: 0.5 },
-  plazasValue: { fontSize: 18, fontWeight: '800', color: '#1A73E8', marginTop: 2 },
+  plazasLabel: { ...typography.labelSm, color: colors.primary },
+  plazasValue: { ...typography.titleLg, color: colors.primary, marginTop: 2 },
 
   nfcBtn: {
     marginTop: 14,
     paddingVertical: 12,
     paddingHorizontal: 20,
-    borderRadius: 12,
-    backgroundColor: '#EEF4FF',
-    borderWidth: 1,
-    borderColor: '#1A73E8',
+    borderRadius: radii.md,
+    backgroundColor: colors.surfaceContainerHigh,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
-  nfcBtnText: { color: '#1A73E8', fontWeight: '700', fontSize: 14 },
+  nfcBtnText: { ...typography.titleSm, color: colors.secondary, lineHeight: 18 },
 });

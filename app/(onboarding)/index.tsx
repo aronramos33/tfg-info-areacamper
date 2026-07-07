@@ -6,32 +6,35 @@ import {
   Pressable,
   StyleSheet,
   Dimensions,
-  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
+import { colors, radii, spacing, shadow, typography } from '@/lib/theme';
 
 const { width } = Dimensions.get('window');
 const ONBOARDING_KEY = '@onboarding_completed';
 
-const SLIDES = [
+type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
+
+const SLIDES: { key: string; icon: IoniconsName; title: string; description: string }[] = [
   {
     key: '1',
-    icon: '🏕',
+    icon: 'leaf-outline',
     title: 'Bienvenido a\nÀrea Camper',
-    description:
-      'Tu área de acampada favorita, ahora en tu bolsillo.',
+    description: 'Tu área de acampada favorita, ahora en tu bolsillo.',
   },
   {
     key: '2',
-    icon: '📱',
+    icon: 'qr-code-outline',
     title: 'Accede con\ntu código QR',
     description:
       'Genera tu código de acceso personal. Se renueva automáticamente para máxima seguridad.',
   },
   {
     key: '3',
-    icon: '📅',
+    icon: 'calendar-outline',
     title: 'Reserva y\ngestiona todo',
     description:
       'Consulta disponibilidad, realiza reservas y descubre los servicios del área.',
@@ -60,7 +63,7 @@ export default function OnboardingScreen() {
   const isLast = currentIndex === SLIDES.length - 1;
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <FlatList
         ref={flatListRef}
         data={SLIDES}
@@ -74,14 +77,13 @@ export default function OnboardingScreen() {
         }}
         renderItem={({ item }) => (
           <View style={styles.slide}>
-            <Text style={styles.icon}>{item.icon}</Text>
+            <Ionicons name={item.icon} size={80} color={colors.primary} style={styles.icon} />
             <Text style={styles.title}>{item.title}</Text>
             <Text style={styles.description}>{item.description}</Text>
           </View>
         )}
       />
 
-      {/* Dots */}
       <View style={styles.dots}>
         {SLIDES.map((_, i) => (
           <View
@@ -91,13 +93,12 @@ export default function OnboardingScreen() {
         ))}
       </View>
 
-      {/* Botón */}
       <View style={styles.footer}>
         <Pressable
           onPress={handleNext}
           style={({ pressed }) => [
             styles.button,
-            pressed && { opacity: 0.8 },
+            pressed && { opacity: 0.85 },
           ]}
         >
           <Text style={styles.buttonText}>
@@ -111,38 +112,33 @@ export default function OnboardingScreen() {
           </Pressable>
         )}
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.background,
   },
   slide: {
     width,
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 40,
-    paddingTop: Platform.select({ ios: 80, android: 60 }),
+    paddingHorizontal: spacing['4xl'],
   },
   icon: {
-    fontSize: 80,
-    marginBottom: 32,
+    marginBottom: spacing['3xl'],
   },
   title: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#111',
+    ...typography.display,
     textAlign: 'center',
-    lineHeight: 40,
-    marginBottom: 20,
+    marginBottom: spacing.xl,
   },
   description: {
-    fontSize: 17,
-    color: '#666',
+    ...typography.bodyLg,
+    color: colors.onSurfaceVariant,
     textAlign: 'center',
     lineHeight: 26,
   },
@@ -150,42 +146,41 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 24,
+    gap: spacing.sm,
+    marginBottom: spacing['2xl'],
   },
   dot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
-    backgroundColor: '#ddd',
+    borderRadius: radii.full,
+    backgroundColor: colors.surfaceContainerHighest,
   },
   dotActive: {
-    backgroundColor: '#1a73e8',
     width: 24,
+    backgroundColor: colors.primary,
   },
   footer: {
-    paddingHorizontal: 28,
-    paddingBottom: Platform.select({ ios: 48, android: 32 }),
-    gap: 12,
+    paddingHorizontal: spacing['2xl'],
+    paddingBottom: spacing['2xl'],
+    gap: spacing.sm,
   },
   button: {
-    backgroundColor: '#1a73e8',
-    borderRadius: 16,
-    paddingVertical: 18,
+    backgroundColor: colors.primary,
+    borderRadius: radii.md,
+    paddingVertical: 16,
     alignItems: 'center',
+    ...shadow.sm,
   },
   buttonText: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '700',
+    ...typography.titleMd,
+    color: colors.onPrimary,
   },
   skipBtn: {
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: spacing.sm,
   },
   skipText: {
-    fontSize: 15,
-    color: '#aaa',
-    fontWeight: '500',
+    ...typography.bodyMd,
+    color: colors.onSurfaceVariant,
   },
 });

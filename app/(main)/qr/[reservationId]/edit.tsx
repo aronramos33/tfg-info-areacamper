@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
@@ -24,6 +24,8 @@ import { Vehicle, vehicleDisplayName } from '@/components/utils/vehicle';
 import { isModifiable } from '@/components/utils/reservationModification';
 import { nightsBetween, normalizeBirthDate, isoBirthToDisplay } from '@/components/utils/dates';
 import { formatCents } from '@/components/utils/money';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
+import { AppAlert } from '@/components/AppAlert';
 
 type Extra = {
   id: number;
@@ -70,13 +72,7 @@ type GuestDraft = {
   email: string;
 };
 
-type SnapshotVehicleDraft = {
-  brand: string;
-  model: string;
-  plate: string;
-  alias: string;
-};
-
+type SnapshotVehicleDraft = { brand: string; model: string; plate: string; alias: string };
 type NewVehicleForm = { brand: string; model: string; plate: string; alias: string };
 
 type PlaceEditState = {
@@ -89,11 +85,7 @@ type PlaceEditState = {
 };
 
 function emptyGuest(): GuestDraft {
-  return {
-    full_name: '', doc_type: 'dni', doc_number: '', doc_support_number: '',
-    nationality: '', birth_date: '', gender: '', country_of_residence: '',
-    city_of_residence: '', phone: '', email: '',
-  };
+  return { full_name: '', doc_type: 'dni', doc_number: '', doc_support_number: '', nationality: '', birth_date: '', gender: '', country_of_residence: '', city_of_residence: '', phone: '', email: '' };
 }
 
 export default function EditReservationScreen() {
@@ -125,27 +117,17 @@ export default function EditReservationScreen() {
         supabase.from('reservations')
           .select('id,user_id,start_date,end_date,status,num_places,nightly_amount_cents,total_amount_cents,vehicle_id,vehicles_snapshot')
           .eq('id', rid).eq('user_id', uid).maybeSingle(),
-        supabase.from('extras')
-          .select('id,code,name_es,unit_amount_cents,pricing_type')
-          .eq('is_active', true),
-        supabase.from('reservation_extras')
-          .select('extra_id,quantity,place_index')
-          .eq('reservation_id', rid),
+        supabase.from('extras').select('id,code,name_es,unit_amount_cents,pricing_type').eq('is_active', true),
+        supabase.from('reservation_extras').select('extra_id,quantity,place_index').eq('reservation_id', rid),
         supabase.from('travelers')
           .select('full_name,doc_type,doc_number,doc_support_number,nationality,birth_date,gender,country_of_residence,city_of_residence,phone,email,place_index,is_main_traveler')
           .eq('reservation_id', rid)
           .order('place_index').order('is_main_traveler', { ascending: false }),
-        supabase.from('vehicles')
-          .select('*').eq('user_id', uid).order('created_at', { ascending: true }),
+        supabase.from('vehicles').select('*').eq('user_id', uid).order('created_at', { ascending: true }),
       ]);
 
       const r = resRes.data as Reservation | null;
-      if (!r) {
-        setLoading(false);
-        Alert.alert('No encontrada', 'No se pudo cargar la reserva.');
-        router.back();
-        return;
-      }
+      if (!r) { setLoading(false); AppAlert.alert('No encontrada', 'No se pudo cargar la reserva.'); router.back(); return; }
 
       const allExtras = (extrasRes.data ?? []) as Extra[];
       const extLines = (extLinesRes.data ?? []) as { extra_id: number; quantity: number; place_index: number | null }[];
@@ -184,21 +166,9 @@ export default function EditReservationScreen() {
             email: t.email ?? '',
           } as GuestDraft));
 
-        const snapshotVehicle: SnapshotVehicleDraft = {
-          brand: snap?.brand ?? '',
-          model: snap?.model ?? '',
-          plate: snap?.plate ?? '',
-          alias: snap?.alias ?? '',
-        };
+        const snapshotVehicle: SnapshotVehicleDraft = { brand: snap?.brand ?? '', model: snap?.model ?? '', plate: snap?.plate ?? '', alias: snap?.alias ?? '' };
 
-        return {
-          vehicleId,
-          snapshotVehicle,
-          numGuests: placeTravelers.length || 1,
-          numPets,
-          electricidad: hasPower,
-          guests: placeTravelers.length > 0 ? placeTravelers : [emptyGuest()],
-        };
+        return { vehicleId, snapshotVehicle, numGuests: placeTravelers.length || 1, numPets, electricidad: hasPower, guests: placeTravelers.length > 0 ? placeTravelers : [emptyGuest()] };
       });
 
       setPlaceStates(states);
@@ -212,31 +182,16 @@ export default function EditReservationScreen() {
   const powerExtra = extras.find(e => e.code === 'POWER') ?? null;
   const personExtra = extras.find(e => e.code === 'PERSON') ?? null;
 
-  const nights = useMemo(
-    () => nightsBetween(reservation?.start_date, endDate),
-    [reservation?.start_date, endDate],
-  );
+  const nights = useMemo(() => nightsBetween(reservation?.start_date, endDate), [reservation?.start_date, endDate]);
 
   const newTotal = useMemo(() => {
     if (!reservation) return 0;
     return placeStates.reduce((acc, ps) => {
       let total = nights * reservation.nightly_amount_cents;
-      if (ps.numPets > 0 && petExtra) {
-        total += petExtra.pricing_type === 'per_stay'
-          ? ps.numPets * petExtra.unit_amount_cents
-          : ps.numPets * nights * petExtra.unit_amount_cents;
-      }
-      if (ps.electricidad && powerExtra) {
-        total += powerExtra.pricing_type === 'per_stay'
-          ? powerExtra.unit_amount_cents
-          : nights * powerExtra.unit_amount_cents;
-      }
+      if (ps.numPets > 0 && petExtra) total += petExtra.pricing_type === 'per_stay' ? ps.numPets * petExtra.unit_amount_cents : ps.numPets * nights * petExtra.unit_amount_cents;
+      if (ps.electricidad && powerExtra) total += powerExtra.pricing_type === 'per_stay' ? powerExtra.unit_amount_cents : nights * powerExtra.unit_amount_cents;
       const extraPersons = Math.max(0, ps.numGuests - 2);
-      if (extraPersons > 0 && personExtra) {
-        total += personExtra.pricing_type === 'per_stay'
-          ? extraPersons * personExtra.unit_amount_cents
-          : extraPersons * nights * personExtra.unit_amount_cents;
-      }
+      if (extraPersons > 0 && personExtra) total += personExtra.pricing_type === 'per_stay' ? extraPersons * personExtra.unit_amount_cents : extraPersons * nights * personExtra.unit_amount_cents;
       return acc + total;
     }, 0);
   }, [placeStates, nights, extras, reservation]);
@@ -247,27 +202,15 @@ export default function EditReservationScreen() {
     setPlaceStates(prev => prev.map((s, i) => i === idx ? { ...s, [key]: val } : s));
 
   const updateSnapshotVehicle = (plazaIdx: number, key: keyof SnapshotVehicleDraft, val: string) =>
-    setPlaceStates(prev => prev.map((s, i) =>
-      i !== plazaIdx ? s : { ...s, snapshotVehicle: { ...s.snapshotVehicle, [key]: val } }
-    ));
+    setPlaceStates(prev => prev.map((s, i) => i !== plazaIdx ? s : { ...s, snapshotVehicle: { ...s.snapshotVehicle, [key]: val } }));
 
   const saveNewVehicle = async () => {
     const { brand, model, plate, alias } = newVehicleForm;
-    if (!brand.trim() || !model.trim() || !plate.trim()) {
-      Alert.alert('Faltan campos', 'Marca, modelo y matrícula son obligatorios.');
-      return;
-    }
+    if (!brand.trim() || !model.trim() || !plate.trim()) { AppAlert.alert('Faltan campos', 'Marca, modelo y matrícula son obligatorios.'); return; }
     setSavingVehicle(true);
-    const { data, error } = await supabase.from('vehicles').insert({
-      user_id: session?.user?.id,
-      brand: brand.trim(),
-      model: model.trim(),
-      plate: plate.trim().toUpperCase(),
-      alias: alias.trim() || null,
-      length_m: null,
-    }).select().single();
+    const { data, error } = await supabase.from('vehicles').insert({ user_id: session?.user?.id, brand: brand.trim(), model: model.trim(), plate: plate.trim().toUpperCase(), alias: alias.trim() || null, length_m: null }).select().single();
     setSavingVehicle(false);
-    if (error) { Alert.alert('Error', error.message); return; }
+    if (error) { AppAlert.alert('Error', error.message); return; }
     const newV = data as Vehicle;
     setVehicles(prev => [...prev, newV]);
     updatePlace(0, 'vehicleId', newV.id);
@@ -296,22 +239,16 @@ export default function EditReservationScreen() {
     placeStates.flatMap((ps, placeIndex) => {
       const rows: any[] = [];
       if (ps.numPets > 0 && petExtra) {
-        const lineTotal = petExtra.pricing_type === 'per_stay'
-          ? ps.numPets * petExtra.unit_amount_cents
-          : ps.numPets * nights * petExtra.unit_amount_cents;
+        const lineTotal = petExtra.pricing_type === 'per_stay' ? ps.numPets * petExtra.unit_amount_cents : ps.numPets * nights * petExtra.unit_amount_cents;
         rows.push({ extra_id: petExtra.id, quantity: ps.numPets, place_index: placeIndex, pricing_type: petExtra.pricing_type, unit_amount_cents: petExtra.unit_amount_cents, line_total_cents: lineTotal });
       }
       if (ps.electricidad && powerExtra) {
-        const lineTotal = powerExtra.pricing_type === 'per_stay'
-          ? powerExtra.unit_amount_cents
-          : nights * powerExtra.unit_amount_cents;
+        const lineTotal = powerExtra.pricing_type === 'per_stay' ? powerExtra.unit_amount_cents : nights * powerExtra.unit_amount_cents;
         rows.push({ extra_id: powerExtra.id, quantity: 1, place_index: placeIndex, pricing_type: powerExtra.pricing_type, unit_amount_cents: powerExtra.unit_amount_cents, line_total_cents: lineTotal });
       }
       const extraPersons = Math.max(0, ps.numGuests - 2);
       if (extraPersons > 0 && personExtra) {
-        const lineTotal = personExtra.pricing_type === 'per_stay'
-          ? extraPersons * personExtra.unit_amount_cents
-          : extraPersons * nights * personExtra.unit_amount_cents;
+        const lineTotal = personExtra.pricing_type === 'per_stay' ? extraPersons * personExtra.unit_amount_cents : extraPersons * nights * personExtra.unit_amount_cents;
         rows.push({ extra_id: personExtra.id, quantity: extraPersons, place_index: placeIndex, pricing_type: personExtra.pricing_type, unit_amount_cents: personExtra.unit_amount_cents, line_total_cents: lineTotal });
       }
       return rows;
@@ -326,15 +263,7 @@ export default function EditReservationScreen() {
         return existing ?? { place_index: i, vehicle_id: null, brand: '', model: '', plate: '', alias: null, length_m: null };
       }
       const sv = ps.snapshotVehicle;
-      return {
-        place_index: i,
-        vehicle_id: null,
-        brand: sv.brand.trim(),
-        model: sv.model.trim(),
-        plate: sv.plate.trim().toUpperCase(),
-        alias: sv.alias.trim() || null,
-        length_m: null,
-      };
+      return { place_index: i, vehicle_id: null, brand: sv.brand.trim(), model: sv.model.trim(), plate: sv.plate.trim().toUpperCase(), alias: sv.alias.trim() || null, length_m: null };
     });
 
   const buildTravelerRows = (resId: number) =>
@@ -369,10 +298,7 @@ export default function EditReservationScreen() {
 
   const submit = async () => {
     if (!reservation) return;
-    if (nights <= 0) {
-      Alert.alert('Fechas inválidas', 'La fecha de salida debe ser posterior a la de entrada.');
-      return;
-    }
+    if (nights <= 0) { AppAlert.alert('Fechas inválidas', 'La fecha de salida debe ser posterior a la de entrada.'); return; }
 
     setSubmitting(true);
     try {
@@ -386,24 +312,16 @@ export default function EditReservationScreen() {
         extras: flatExtras.map(e => ({ extra_id: e.extra_id, quantity: e.quantity, place_index: e.place_index })),
         return_url: redirectBase,
       };
-      if (firstVehicleId != null && firstVehicleId !== reservation.vehicle_id) {
-        body.vehicle_id = firstVehicleId;
-      }
+      if (firstVehicleId != null && firstVehicleId !== reservation.vehicle_id) body.vehicle_id = firstVehicleId;
 
       const { data, error } = await supabase.functions.invoke('modify-reservation', { body });
-      if (error) {
-        Alert.alert('Error', error.message ?? 'No se pudo modificar.');
-        return;
-      }
+      if (error) { AppAlert.alert('Error', error.message ?? 'No se pudo modificar.'); return; }
 
       const mode = data?.mode as 'free' | 'refunded' | 'checkout';
 
       if (mode === 'checkout' && data?.url) {
         const pendingKey = `pending_modify_travelers_${reservation.id}`;
-        await AsyncStorage.setItem(pendingKey, JSON.stringify({
-          travelers: buildTravelerRows(reservation.id),
-          snapshot: buildVehiclesSnapshot(),
-        }));
+        await AsyncStorage.setItem(pendingKey, JSON.stringify({ travelers: buildTravelerRows(reservation.id), snapshot: buildVehiclesSnapshot() }));
 
         const result = await WebBrowser.openAuthSessionAsync(String(data.url), redirectBase);
 
@@ -416,16 +334,17 @@ export default function EditReservationScreen() {
             await supabase.from('travelers').delete().eq('reservation_id', reservation.id);
             if (travelers.length > 0) await supabase.from('travelers').insert(travelers);
           }
-          router.replace('/(main)/qr' as any);
-          setTimeout(() => router.push(`/(main)/qr/${reservation.id}` as any), 0);
+          router.replace({
+            pathname: '/(screens)/booking-success',
+            params: { reservationId: String(reservation.id) },
+          } as any);
         } else {
           await AsyncStorage.removeItem(pendingKey);
-          Alert.alert('Pago no completado', 'Puedes intentarlo de nuevo.');
+          AppAlert.alert('Pago no completado', 'Puedes intentarlo de nuevo.');
         }
         return;
       }
 
-      // delta = 0 o delta < 0: aplicar viajeros y snapshot directamente
       await applyTravelersAndSnapshot(reservation.id);
 
       const goToReservation = () => {
@@ -434,18 +353,12 @@ export default function EditReservationScreen() {
       };
 
       if (mode === 'refunded') {
-        Alert.alert(
-          'Cambios aplicados',
-          `Hemos iniciado un reembolso de ${formatCents(Number(data?.refund_amount_cents ?? 0))} en tu método de pago.\n\nTu banco lo reflejará en 5-10 días laborables.`,
-          [{ text: 'OK', onPress: goToReservation }],
-        );
+        AppAlert.alert('Cambios aplicados', `Hemos iniciado un reembolso de ${formatCents(Number(data?.refund_amount_cents ?? 0))} en tu método de pago.\n\nTu banco lo reflejará en 5-10 días laborables.`, [{ text: 'OK', onPress: goToReservation }]);
       } else {
-        Alert.alert('Cambios aplicados', 'Tu reserva se ha actualizado.', [
-          { text: 'OK', onPress: goToReservation },
-        ]);
+        AppAlert.alert('Cambios aplicados', 'Tu reserva se ha actualizado.', [{ text: 'OK', onPress: goToReservation }]);
       }
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'No se pudo modificar.');
+      AppAlert.alert('Error', e?.message ?? 'No se pudo modificar.');
     } finally {
       setSubmitting(false);
     }
@@ -455,7 +368,7 @@ export default function EditReservationScreen() {
   if (loading || !reservation) {
     return (
       <SafeAreaView style={styles.center}>
-        <ActivityIndicator />
+        <ActivityIndicator color={colors.primary} />
       </SafeAreaView>
     );
   }
@@ -477,8 +390,8 @@ export default function EditReservationScreen() {
   if (!s) return null;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F7F8FB' }}>
-      <View style={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 4 }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: 4 }}>
         <Pressable onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backText}>‹ Volver</Text>
         </Pressable>
@@ -487,17 +400,14 @@ export default function EditReservationScreen() {
       </View>
 
       {placeStates.length > 1 && (
-        <View style={{ flexDirection: 'row', paddingHorizontal: 16, gap: 8, paddingVertical: 8, flexWrap: 'wrap' }}>
+        <View style={{ flexDirection: 'row', paddingHorizontal: spacing.md, gap: 8, paddingVertical: 8, flexWrap: 'wrap' }}>
           {placeStates.map((_, i) => (
             <Pressable
               key={i}
               onPress={() => { setActivePlaza(i); scrollRef.current?.scrollTo({ y: 0, animated: false }); }}
-              style={{
-                paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
-                backgroundColor: activePlaza === i ? '#111' : '#E5E7EB',
-              }}
+              style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: radii.full, backgroundColor: activePlaza === i ? colors.primary : colors.surfaceContainerHigh }}
             >
-              <Text style={{ color: activePlaza === i ? '#fff' : '#333', fontWeight: '600', fontSize: 13 }}>
+              <Text style={{ color: activePlaza === i ? colors.onPrimary : colors.onSurface, fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 13 }}>
                 Plaza {i + 1}
               </Text>
             </Pressable>
@@ -505,11 +415,11 @@ export default function EditReservationScreen() {
         </View>
       )}
 
-      <ScrollView ref={scrollRef} contentContainerStyle={{ padding: 16, paddingBottom: 48 }}>
+      <ScrollView ref={scrollRef} contentContainerStyle={{ padding: spacing.md, paddingBottom: 48 }}>
 
-        {/* ── ESTANCIA ── */}
+        {/* ESTANCIA */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>📅 Estancia</Text>
+          <Text style={styles.cardTitle}>Estancia</Text>
           <Text style={styles.helper}>La entrada queda fija. Ajusta la fecha de salida.</Text>
           <View style={styles.row}>
             <Text style={styles.rowLabel}>Entrada</Text>
@@ -522,26 +432,20 @@ export default function EditReservationScreen() {
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
             <Text style={styles.rowLabel}>Noches</Text>
             <View style={styles.stepperRow}>
-              <Pressable
-                onPress={() => { if (nights > 1) setEndDate(dayjs(endDate).subtract(1, 'day').format('YYYY-MM-DD')); }}
-                style={[styles.stepBtn, nights <= 1 && { opacity: 0.4 }]}
-              >
-                <Text style={styles.stepText}>−</Text>
+              <Pressable onPress={() => { if (nights > 1) setEndDate(dayjs(endDate).subtract(1, 'day').format('YYYY-MM-DD')); }} style={[styles.stepBtn, nights <= 1 && { opacity: 0.4 }]}>
+                <Ionicons name="remove" size={18} color={colors.onSurface} />
               </Pressable>
-              <Text style={{ fontSize: 18, fontWeight: '700', minWidth: 28, textAlign: 'center' }}>{nights}</Text>
-              <Pressable
-                onPress={() => setEndDate(dayjs(endDate).add(1, 'day').format('YYYY-MM-DD'))}
-                style={styles.stepBtn}
-              >
-                <Text style={styles.stepText}>+</Text>
+              <Text style={{ ...typography.titleLg, minWidth: 28, textAlign: 'center' }}>{nights}</Text>
+              <Pressable onPress={() => setEndDate(dayjs(endDate).add(1, 'day').format('YYYY-MM-DD'))} style={styles.stepBtn}>
+                <Ionicons name="add" size={18} color={colors.onSurface} />
               </Pressable>
             </View>
           </View>
         </View>
 
-        {/* ── VEHÍCULO ── */}
+        {/* VEHÍCULO */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>🚐 Vehículo{placeStates.length > 1 ? ` — Plaza ${activePlaza + 1}` : ''}</Text>
+          <Text style={styles.cardTitle}>Vehículo{placeStates.length > 1 ? ` — Plaza ${activePlaza + 1}` : ''}</Text>
 
           {activePlaza === 0 ? (
             <>
@@ -551,30 +455,25 @@ export default function EditReservationScreen() {
                   <Pressable
                     key={v.id}
                     onPress={() => { updatePlace(0, 'vehicleId', v.id); setShowNewVehicleForm(false); }}
-                    style={{
-                      borderRadius: 12, padding: 14, marginBottom: 8,
-                      backgroundColor: sel ? '#111' : '#fff',
-                      borderWidth: 1.5, borderColor: sel ? '#111' : '#E5E7EB',
-                      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                    }}
+                    style={{ borderRadius: radii.md, padding: 14, marginBottom: 8, backgroundColor: sel ? colors.primary : colors.surfaceContainerHigh, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
                   >
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                       <Text style={{ fontSize: 20 }}>🚐</Text>
                       <View>
-                        <Text style={{ fontWeight: '700', fontSize: 14, color: sel ? '#fff' : '#111' }}>{vehicleDisplayName(v)}</Text>
-                        <Text style={{ color: sel ? '#ccc' : '#888', fontSize: 12 }}>{v.plate}</Text>
+                        <Text style={{ fontFamily: 'PlusJakartaSans_700Bold', fontSize: 14, color: sel ? colors.onPrimary : colors.onSurface }}>{vehicleDisplayName(v)}</Text>
+                        <Text style={{ color: sel ? 'rgba(255,255,255,0.7)' : colors.onSurfaceVariant, fontSize: 12 }}>{v.plate}</Text>
                       </View>
                     </View>
-                    {sel && <Text style={{ color: '#fff', fontSize: 18 }}>✓</Text>}
+                    {sel && <Text style={{ color: colors.onPrimary, fontSize: 18 }}>✓</Text>}
                   </Pressable>
                 );
               })}
 
               <Pressable
                 onPress={() => setShowNewVehicleForm(v => !v)}
-                style={{ marginTop: 4, paddingVertical: 10, alignItems: 'center', borderRadius: 10, borderWidth: 1.5, borderColor: '#1A73E8', borderStyle: 'dashed' }}
+                style={{ marginTop: 4, paddingVertical: 10, alignItems: 'center', borderRadius: radii.sm, borderWidth: 2, borderColor: colors.secondary, borderStyle: 'dashed' }}
               >
-                <Text style={{ color: '#1A73E8', fontWeight: '700', fontSize: 13 }}>
+                <Text style={{ color: colors.secondary, fontFamily: 'PlusJakartaSans_600SemiBold', fontSize: 13 }}>
                   {showNewVehicleForm ? 'Cancelar' : '+ Añadir nuevo vehículo'}
                 </Text>
               </Pressable>
@@ -589,11 +488,7 @@ export default function EditReservationScreen() {
                   <TextInput value={newVehicleForm.plate} onChangeText={v => setNewVehicleForm(f => ({ ...f, plate: v }))} placeholder="Ej: 1234 ABC" autoCapitalize="characters" autoCorrect={false} style={styles.input} />
                   <Text style={styles.fieldLabel}>Alias (opcional)</Text>
                   <TextInput value={newVehicleForm.alias} onChangeText={v => setNewVehicleForm(f => ({ ...f, alias: v }))} placeholder="Ej: La furgo" style={styles.input} />
-                  <Pressable
-                    onPress={saveNewVehicle}
-                    disabled={savingVehicle}
-                    style={[styles.actionBtn, styles.confirmBtn, { marginTop: 8 }, savingVehicle && { opacity: 0.6 }]}
-                  >
+                  <Pressable onPress={saveNewVehicle} disabled={savingVehicle} style={[styles.actionBtn, styles.confirmBtn, { marginTop: 8 }, savingVehicle && { opacity: 0.6 }]}>
                     <Text style={styles.confirmBtnText}>{savingVehicle ? 'Guardando…' : 'Guardar y seleccionar'}</Text>
                   </Pressable>
                 </View>
@@ -614,16 +509,14 @@ export default function EditReservationScreen() {
           )}
         </View>
 
-        {/* ── HUÉSPEDES ── */}
+        {/* HUÉSPEDES */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>👥 Huéspedes{placeStates.length > 1 ? ` — Plaza ${activePlaza + 1}` : ''}</Text>
+          <Text style={styles.cardTitle}>Huéspedes{placeStates.length > 1 ? ` — Plaza ${activePlaza + 1}` : ''}</Text>
 
           <CounterRow
             label="Viajeros"
             subtitle={personExtra ? `Extra a partir del 3º: ${formatCents(personExtra.unit_amount_cents)} / viajero / ${personExtra.pricing_type === 'per_stay' ? 'estancia' : 'noche'}` : 'Mín. 1, máx. 6.'}
-            value={s.numGuests}
-            min={1}
-            max={6}
+            value={s.numGuests} min={1} max={6}
             onDecrement={() => changeNumGuests(activePlaza, -1)}
             onIncrement={() => changeNumGuests(activePlaza, +1)}
           />
@@ -633,8 +526,7 @@ export default function EditReservationScreen() {
           <CounterRow
             label="Mascotas"
             subtitle={petExtra ? `Suplemento: ${formatCents(petExtra.unit_amount_cents)} / mascota / ${petExtra.pricing_type === 'per_stay' ? 'estancia' : 'noche'}` : undefined}
-            value={s.numPets}
-            min={0}
+            value={s.numPets} min={0}
             onDecrement={() => updatePlace(activePlaza, 'numPets', Math.max(0, s.numPets - 1))}
             onIncrement={() => updatePlace(activePlaza, 'numPets', s.numPets + 1)}
           />
@@ -643,9 +535,9 @@ export default function EditReservationScreen() {
 
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 }}>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 15, fontWeight: '500' }}>Electricidad</Text>
+              <Text style={{ ...typography.bodyLg, color: colors.onSurface }}>Electricidad</Text>
               {powerExtra && (
-                <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
+                <Text style={{ ...typography.bodyMd }}>
                   Suplemento: {formatCents(powerExtra.unit_amount_cents)} / {powerExtra.pricing_type === 'per_stay' ? 'estancia' : 'noche'}
                 </Text>
               )}
@@ -653,13 +545,13 @@ export default function EditReservationScreen() {
             <Switch
               value={s.electricidad}
               onValueChange={v => updatePlace(activePlaza, 'electricidad', v)}
-              trackColor={{ true: '#1A73E8', false: '#E5E7EB' }}
-              thumbColor="#fff"
+              trackColor={{ true: colors.primary, false: colors.surfaceContainerHigh }}
+              thumbColor={colors.onPrimary}
             />
           </View>
         </View>
 
-        {/* ── DATOS DE VIAJEROS ── */}
+        {/* DATOS DE VIAJEROS */}
         <Text style={styles.sectionLabel}>
           Datos de los viajeros{placeStates.length > 1 ? ` — Plaza ${activePlaza + 1}` : ''}
         </Text>
@@ -667,8 +559,8 @@ export default function EditReservationScreen() {
         {s.guests.map((g, gi) => (
           <View key={gi} style={styles.card}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#111' }} />
-              <Text style={{ fontWeight: '700', fontSize: 14 }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary }} />
+              <Text style={{ fontFamily: 'PlusJakartaSans_700Bold', fontSize: 14, color: colors.onSurface }}>
                 {activePlaza === 0 && gi === 0 ? 'Titular — ' : ''}Viajero {gi + 1}
               </Text>
             </View>
@@ -682,14 +574,9 @@ export default function EditReservationScreen() {
                 <Pressable
                   key={type}
                   onPress={() => updateGuest(activePlaza, gi, 'doc_type', type)}
-                  style={{
-                    flex: 1, paddingVertical: 8, borderRadius: 8, borderWidth: 1.5,
-                    borderColor: g.doc_type === type ? '#1A73E8' : '#E5E7EB',
-                    backgroundColor: g.doc_type === type ? '#EAF1FE' : '#fff',
-                    alignItems: 'center',
-                  }}
+                  style={{ flex: 1, paddingVertical: 8, borderRadius: radii.sm, backgroundColor: g.doc_type === type ? colors.primary : colors.surfaceContainerHigh, alignItems: 'center' }}
                 >
-                  <Text style={{ fontWeight: '600', fontSize: 11, color: g.doc_type === type ? '#1A73E8' : '#555' }}>
+                  <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 11, color: g.doc_type === type ? colors.onPrimary : colors.onSurfaceVariant }}>
                     {type === 'passport' ? 'Pasaporte' : type.toUpperCase()}
                   </Text>
                 </Pressable>
@@ -711,14 +598,9 @@ export default function EditReservationScreen() {
                 <Pressable
                   key={val}
                   onPress={() => updateGuest(activePlaza, gi, 'gender', val)}
-                  style={{
-                    flex: 1, paddingVertical: 8, borderRadius: 8, borderWidth: 1.5,
-                    borderColor: g.gender === val ? '#1A73E8' : '#E5E7EB',
-                    backgroundColor: g.gender === val ? '#EAF1FE' : '#fff',
-                    alignItems: 'center',
-                  }}
+                  style={{ flex: 1, paddingVertical: 8, borderRadius: radii.sm, backgroundColor: g.gender === val ? colors.primary : colors.surfaceContainerHigh, alignItems: 'center' }}
                 >
-                  <Text style={{ fontWeight: '600', fontSize: 11, color: g.gender === val ? '#1A73E8' : '#555' }}>{label}</Text>
+                  <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 11, color: g.gender === val ? colors.onPrimary : colors.onSurfaceVariant }}>{label}</Text>
                 </Pressable>
               ))}
             </View>
@@ -740,84 +622,59 @@ export default function EditReservationScreen() {
           </View>
         ))}
 
-        {/* ── DESGLOSE DE PRECIOS ── */}
+        {/* DESGLOSE DE PRECIOS */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>💰 Desglose de precios</Text>
+          <Text style={styles.cardTitle}>Desglose de precios</Text>
           <Text style={styles.helper}>{nights} noche{nights !== 1 ? 's' : ''} · {reservation.num_places} plaza{reservation.num_places !== 1 ? 's' : ''}</Text>
 
           {placeStates.map((ps, i) => {
             const placeBase = nights * reservation.nightly_amount_cents;
-            const placePets = ps.numPets > 0 && petExtra
-              ? (petExtra.pricing_type === 'per_stay' ? ps.numPets * petExtra.unit_amount_cents : ps.numPets * nights * petExtra.unit_amount_cents)
-              : 0;
-            const placePower = ps.electricidad && powerExtra
-              ? (powerExtra.pricing_type === 'per_stay' ? powerExtra.unit_amount_cents : nights * powerExtra.unit_amount_cents)
-              : 0;
+            const placePets = ps.numPets > 0 && petExtra ? (petExtra.pricing_type === 'per_stay' ? ps.numPets * petExtra.unit_amount_cents : ps.numPets * nights * petExtra.unit_amount_cents) : 0;
+            const placePower = ps.electricidad && powerExtra ? (powerExtra.pricing_type === 'per_stay' ? powerExtra.unit_amount_cents : nights * powerExtra.unit_amount_cents) : 0;
             const extraPersons = Math.max(0, ps.numGuests - 2);
-            const placePerson = extraPersons > 0 && personExtra
-              ? (personExtra.pricing_type === 'per_stay' ? extraPersons * personExtra.unit_amount_cents : extraPersons * nights * personExtra.unit_amount_cents)
-              : 0;
+            const placePerson = extraPersons > 0 && personExtra ? (personExtra.pricing_type === 'per_stay' ? extraPersons * personExtra.unit_amount_cents : extraPersons * nights * personExtra.unit_amount_cents) : 0;
             const placeTotal = placeBase + placePets + placePower + placePerson;
 
             return (
               <View key={i} style={{ marginBottom: 12 }}>
-                <Text style={{ fontWeight: '700', fontSize: 13, color: '#1A73E8', marginBottom: 4 }}>Plaza {i + 1}</Text>
+                <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 13, color: colors.secondary, marginBottom: 4, letterSpacing: 0.5, textTransform: 'uppercase' }}>Plaza {i + 1}</Text>
                 <View style={styles.row}>
                   <Text style={styles.rowLabel}>{nights}n × {formatCents(reservation.nightly_amount_cents)}</Text>
                   <Text style={styles.rowValue}>{formatCents(placeBase)}</Text>
                 </View>
-                {placePets > 0 && (
-                  <View style={styles.row}>
-                    <Text style={styles.rowLabel}>Mascotas ({ps.numPets})</Text>
-                    <Text style={styles.rowValue}>{formatCents(placePets)}</Text>
-                  </View>
-                )}
-                {placePower > 0 && (
-                  <View style={styles.row}>
-                    <Text style={styles.rowLabel}>Electricidad</Text>
-                    <Text style={styles.rowValue}>{formatCents(placePower)}</Text>
-                  </View>
-                )}
-                {placePerson > 0 && (
-                  <View style={styles.row}>
-                    <Text style={styles.rowLabel}>Viajeros extra ({extraPersons})</Text>
-                    <Text style={styles.rowValue}>{formatCents(placePerson)}</Text>
-                  </View>
-                )}
-                <View style={[styles.row, { borderTopWidth: 1, borderTopColor: '#F0F0F0', marginTop: 4, paddingTop: 4 }]}>
-                  <Text style={{ color: '#444', fontWeight: '600' }}>Subtotal plaza {i + 1}</Text>
-                  <Text style={{ fontWeight: '700' }}>{formatCents(placeTotal)}</Text>
+                {placePets > 0 && <View style={styles.row}><Text style={styles.rowLabel}>Mascotas ({ps.numPets})</Text><Text style={styles.rowValue}>{formatCents(placePets)}</Text></View>}
+                {placePower > 0 && <View style={styles.row}><Text style={styles.rowLabel}>Electricidad</Text><Text style={styles.rowValue}>{formatCents(placePower)}</Text></View>}
+                {placePerson > 0 && <View style={styles.row}><Text style={styles.rowLabel}>Viajeros extra ({extraPersons})</Text><Text style={styles.rowValue}>{formatCents(placePerson)}</Text></View>}
+                <View style={styles.row}>
+                  <Text style={{ ...typography.titleSm, color: colors.onSurface, flex: 1 }}>Subtotal plaza {i + 1}</Text>
+                  <Text style={{ fontFamily: 'PlusJakartaSans_700Bold', fontSize: 14, color: colors.onSurface }}>{formatCents(placeTotal)}</Text>
                 </View>
               </View>
             );
           })}
 
-          <View style={{ borderTopWidth: 1.5, borderTopColor: '#E5E7EB', paddingTop: 12, marginTop: 4 }}>
+          <View style={{ borderTopWidth: 1, borderTopColor: colors.outline, paddingTop: 12, marginTop: 4 }}>
             <View style={styles.row}>
               <Text style={styles.rowLabel}>Total original</Text>
               <Text style={styles.rowValue}>{formatCents(reservation.total_amount_cents)}</Text>
             </View>
             <View style={styles.row}>
-              <Text style={[styles.rowLabel, { fontWeight: '700', color: '#111' }]}>Total nuevo</Text>
-              <Text style={[styles.rowValue, { fontWeight: '800' }]}>{formatCents(newTotal)}</Text>
+              <Text style={[styles.rowLabel, { fontFamily: 'PlusJakartaSans_700Bold', color: colors.onSurface }]}>Total nuevo</Text>
+              <Text style={[styles.rowValue, { fontFamily: 'PlusJakartaSans_700Bold' }]}>{formatCents(newTotal)}</Text>
             </View>
           </View>
 
           <View style={styles.totalRow}>
-            <Text style={[styles.totalLabel, delta > 0 && { color: '#1A73E8' }, delta < 0 && { color: '#c0392b' }]}>
+            <Text style={[styles.totalLabel, delta > 0 && { color: colors.primary }, delta < 0 && { color: colors.error }]}>
               {delta > 0 ? 'A pagar ahora' : delta < 0 ? 'Se reembolsará' : 'Sin coste adicional'}
             </Text>
-            <Text style={[styles.totalValue, delta > 0 && { color: '#1A73E8' }, delta < 0 && { color: '#c0392b' }]}>
+            <Text style={[styles.totalValue, delta > 0 && { color: colors.primary }, delta < 0 && { color: colors.error }]}>
               {delta === 0 ? '—' : (delta > 0 ? '+' : '−') + formatCents(Math.abs(delta))}
             </Text>
           </View>
         </View>
 
-        <Pressable
-          onPress={submit}
-          disabled={submitting}
-          style={[styles.actionBtn, styles.confirmBtn, submitting && { opacity: 0.6 }]}
-        >
+        <Pressable onPress={submit} disabled={submitting} style={[styles.actionBtn, styles.confirmBtn, submitting && { opacity: 0.6 }]}>
           <Text style={styles.confirmBtnText}>
             {submitting ? 'Procesando…' : delta > 0 ? 'Pagar y aplicar' : delta < 0 ? 'Confirmar y reembolsar' : 'Aplicar cambios'}
           </Text>
@@ -836,16 +693,16 @@ function CounterRow({ label, subtitle, value, min, max, onDecrement, onIncrement
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4 }}>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 15, fontWeight: '500' }}>{label}</Text>
-        {subtitle && <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{subtitle}</Text>}
+        <Text style={{ ...typography.bodyLg, color: colors.onSurface }}>{label}</Text>
+        {subtitle && <Text style={{ ...typography.bodyMd }}>{subtitle}</Text>}
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-        <Pressable onPress={onDecrement} disabled={atMin} style={styles.stepBtn}>
-          <Text style={[styles.stepText, { color: atMin ? '#CCC' : '#111' }]}>−</Text>
+        <Pressable onPress={onDecrement} disabled={atMin} style={[styles.stepBtn, atMin && { opacity: 0.4 }]}>
+          <Ionicons name="remove" size={18} color={colors.onSurface} />
         </Pressable>
-        <Text style={{ fontSize: 18, fontWeight: '700', minWidth: 24, textAlign: 'center' }}>{value}</Text>
-        <Pressable onPress={onIncrement} disabled={atMax} style={styles.stepBtn}>
-          <Text style={[styles.stepText, { color: atMax ? '#CCC' : '#111' }]}>+</Text>
+        <Text style={{ ...typography.titleLg, minWidth: 24, textAlign: 'center' }}>{value}</Text>
+        <Pressable onPress={onIncrement} disabled={atMax} style={[styles.stepBtn, atMax && { opacity: 0.4 }]}>
+          <Ionicons name="add" size={18} color={colors.onSurface} />
         </Pressable>
       </View>
     </View>
@@ -853,37 +710,45 @@ function CounterRow({ label, subtitle, value, min, max, onDecrement, onIncrement
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing['2xl'], backgroundColor: colors.background },
   backBtn: { marginBottom: 8 },
-  backText: { color: '#007AFF', fontWeight: '700', fontSize: 16 },
-  title: { fontSize: 26, fontWeight: '800', color: '#111' },
-  subtle: { color: '#666', marginTop: 4, marginBottom: 8 },
-  sectionLabel: { fontSize: 13, fontWeight: '700', color: '#888', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  backText: { ...typography.titleMd, color: colors.secondary },
+  title: { ...typography.headlineMd },
+  subtle: { ...typography.bodyMd, marginTop: 4, marginBottom: 8 },
+  sectionLabel: { ...typography.labelSm, marginBottom: 8 },
   card: {
-    backgroundColor: 'white', borderRadius: 16, padding: 16, marginBottom: 14,
-    elevation: 2, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    marginBottom: 14,
+    ...shadow.sm,
   },
-  cardTitle: { fontSize: 15, fontWeight: '800', marginBottom: 10 },
-  helper: { fontSize: 13, color: '#888', marginBottom: 8 },
-  divider: { height: 1, backgroundColor: '#F3F3F3', marginVertical: 8 },
+  cardTitle: { ...typography.titleLg, marginBottom: 10 },
+  helper: { ...typography.bodyMd, marginBottom: 8 },
+  divider: { height: 1, backgroundColor: colors.outlineVariant, marginVertical: 8 },
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
-  rowLabel: { color: '#666' },
-  rowValue: { fontWeight: '600' },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 12, marginTop: 4, borderTopWidth: 1, borderTopColor: '#eee' },
-  totalLabel: { fontSize: 16, fontWeight: '800' },
-  totalValue: { fontSize: 16, fontWeight: '800' },
+  rowLabel: { ...typography.bodyMd },
+  rowValue: { ...typography.titleSm, color: colors.onSurface },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 12, marginTop: 4, borderTopWidth: 1, borderTopColor: colors.outline },
+  totalLabel: { ...typography.titleLg },
+  totalValue: { ...typography.titleLg },
   stepperRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  stepBtn: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#F2F4F8', justifyContent: 'center', alignItems: 'center' },
-  stepText: { fontSize: 18, fontWeight: '800' },
-  fieldLabel: { fontSize: 12, fontWeight: '600', color: '#888', marginBottom: 4, marginTop: 8 },
+  stepBtn: { width: 34, height: 34, borderRadius: radii.sm, backgroundColor: colors.surfaceContainerHigh, justifyContent: 'center', alignItems: 'center' },
+  fieldLabel: { ...typography.labelMd, marginBottom: 4, marginTop: 8 },
   input: {
-    borderWidth: 1.5, borderColor: '#E5E7EB', borderRadius: 10,
-    paddingHorizontal: 12, paddingVertical: 10,
-    fontSize: 14, backgroundColor: '#fff', marginBottom: 4,
+    borderWidth: 1,
+    borderColor: colors.outline,
+    borderRadius: radii.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: colors.inputSurface,
+    marginBottom: 4,
+    ...typography.bodyMd,
+    color: colors.onSurface,
   },
-  actionBtn: { paddingVertical: 14, borderRadius: 14, alignItems: 'center' },
-  confirmBtn: { backgroundColor: '#1A73E8' },
-  confirmBtnText: { color: 'white', fontWeight: '800', fontSize: 15 },
-  cancelBtn: { backgroundColor: 'white', borderWidth: 2, borderColor: '#888' },
-  cancelBtnText: { color: '#333', fontWeight: '700', fontSize: 15 },
+  actionBtn: { paddingVertical: 14, borderRadius: radii.md, alignItems: 'center' },
+  confirmBtn: { backgroundColor: colors.primary, ...shadow.sm },
+  confirmBtnText: { ...typography.titleMd, color: colors.onPrimary },
+  cancelBtn: { backgroundColor: colors.surfaceContainerLow, borderWidth: 1, borderColor: colors.outline },
+  cancelBtnText: { ...typography.titleMd, color: colors.onSurface },
 });

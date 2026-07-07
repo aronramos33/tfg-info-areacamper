@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -23,6 +22,8 @@ import {
   normalizePlate,
   vehicleDisplayName,
 } from '@/components/utils/vehicle';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
+import { AppAlert } from '@/components/AppAlert';
 
 type FormState = {
   brand: string;
@@ -59,7 +60,7 @@ export default function VehiclesScreen() {
       .order('created_at', { ascending: true });
     if (error) {
       console.warn('[loadVehicles]', error);
-      Alert.alert('Error', 'No se pudieron cargar tus vehículos.');
+      AppAlert.alert('Error', 'No se pudieron cargar tus vehículos.');
     } else {
       setVehicles((data ?? []) as Vehicle[]);
     }
@@ -106,7 +107,7 @@ export default function VehiclesScreen() {
     if (!userId) return;
     const err = validateForm();
     if (err) {
-      Alert.alert('Datos inválidos', err);
+      AppAlert.alert('Datos inválidos', err);
       return;
     }
     setSaving(true);
@@ -123,7 +124,7 @@ export default function VehiclesScreen() {
         const { error } = await supabase.from('vehicles').insert(payload);
         if (error) {
           if ((error as any).code === '23505') {
-            Alert.alert(
+            AppAlert.alert(
               'Matrícula duplicada',
               'Ya tienes un vehículo con esa matrícula.',
             );
@@ -138,7 +139,7 @@ export default function VehiclesScreen() {
           .eq('id', editingId);
         if (error) {
           if ((error as any).code === '23505') {
-            Alert.alert(
+            AppAlert.alert(
               'Matrícula duplicada',
               'Ya tienes otro vehículo con esa matrícula.',
             );
@@ -150,14 +151,14 @@ export default function VehiclesScreen() {
       cancelEdit();
       await loadVehicles();
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'No se pudo guardar el vehículo.');
+      AppAlert.alert('Error', e?.message ?? 'No se pudo guardar el vehículo.');
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = (v: Vehicle) => {
-    Alert.alert(
+    AppAlert.alert(
       'Eliminar vehículo',
       `¿Seguro que quieres eliminar ${vehicleDisplayName(v)}?\n\nLas reservas históricas conservarán los datos del vehículo.`,
       [
@@ -171,7 +172,7 @@ export default function VehiclesScreen() {
               .delete()
               .eq('id', v.id);
             if (error) {
-              Alert.alert('Error', error.message);
+              AppAlert.alert('Error', error.message);
               return;
             }
             await loadVehicles();
@@ -203,8 +204,8 @@ export default function VehiclesScreen() {
 
           {loading ? (
             <View style={styles.loadingRow}>
-              <ActivityIndicator />
-              <Text style={{ marginLeft: 10 }}>Cargando…</Text>
+              <ActivityIndicator color={colors.primary} />
+              <Text style={[typography.bodyMd, { marginLeft: 10 }]}>Cargando…</Text>
             </View>
           ) : (
             <>
@@ -255,7 +256,7 @@ export default function VehiclesScreen() {
                             disabled={editingId !== null}
                           >
                             <Text
-                              style={[styles.actionText, { color: '#c0392b' }]}
+                              style={[styles.actionText, { color: colors.error }]}
                             >
                               Eliminar
                             </Text>
@@ -318,6 +319,7 @@ function VehicleForm({
         value={form.brand}
         onChangeText={(t) => setField('brand', t)}
         placeholder="Mercedes, Volkswagen…"
+        placeholderTextColor={colors.onSurfaceVariant}
         style={styles.input}
         autoCapitalize="words"
       />
@@ -327,6 +329,7 @@ function VehicleForm({
         value={form.model}
         onChangeText={(t) => setField('model', t)}
         placeholder="Marco Polo, California…"
+        placeholderTextColor={colors.onSurfaceVariant}
         style={styles.input}
       />
 
@@ -335,6 +338,7 @@ function VehicleForm({
         value={form.plate}
         onChangeText={(t) => setField('plate', t)}
         placeholder="1234ABC"
+        placeholderTextColor={colors.onSurfaceVariant}
         style={styles.input}
         autoCapitalize="characters"
         autoCorrect={false}
@@ -345,6 +349,7 @@ function VehicleForm({
         value={form.alias}
         onChangeText={(t) => setField('alias', t)}
         placeholder="La furgo grande"
+        placeholderTextColor={colors.onSurfaceVariant}
         style={styles.input}
       />
 
@@ -361,7 +366,7 @@ function VehicleForm({
           disabled={saving}
           style={[styles.actionBtn, styles.saveAction, { flex: 1 }]}
         >
-          <Text style={[styles.actionText, { color: 'white' }]}>
+          <Text style={[styles.actionText, { color: colors.onPrimary }]}>
             {saving ? 'Guardando…' : 'Guardar'}
           </Text>
         </Pressable>
@@ -371,12 +376,12 @@ function VehicleForm({
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#fff' },
-  container: { padding: 16, paddingBottom: 40, gap: 14 },
+  safe: { flex: 1, backgroundColor: colors.background },
+  container: { padding: spacing.lg, paddingBottom: 40, gap: 14 },
   headerRow: { gap: 6 },
   backBtn: { paddingVertical: 4 },
-  backText: { fontSize: 15, color: '#1a73e8', fontWeight: '600' },
-  title: { fontSize: 28, fontWeight: 'bold', marginTop: 4 },
+  backText: { ...typography.titleMd, color: colors.secondary },
+  title: { ...typography.headlineLg, marginTop: 4 },
   loadingRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -384,61 +389,61 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     padding: 18,
-    borderRadius: 14,
-    backgroundColor: '#F7F8FB',
-    borderWidth: 1,
-    borderColor: '#eee',
+    borderRadius: radii.md,
+    backgroundColor: colors.surfaceContainerLow,
+    ...shadow.sm,
   },
-  emptyTitle: { fontSize: 16, fontWeight: '700', marginBottom: 4 },
-  emptyText: { fontSize: 14, color: '#555', lineHeight: 20 },
+  emptyTitle: { ...typography.titleMd, marginBottom: 4 },
+  emptyText: { ...typography.bodyMd, lineHeight: 20 },
   card: {
-    padding: 16,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
+    padding: spacing.lg,
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.md,
     gap: 4,
+    ...shadow.sm,
   },
-  vehicleName: { fontSize: 17, fontWeight: '700', color: '#111' },
-  vehicleMeta: { fontSize: 14, color: '#555' },
+  vehicleName: { ...typography.titleMd },
+  vehicleMeta: { ...typography.bodyMd },
   plate: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#1a73e8',
+    ...typography.titleSm,
+    color: colors.secondary,
     marginTop: 2,
     fontFamily: Platform.select({ ios: 'Courier', android: 'monospace' }),
+    letterSpacing: 1,
   },
-  formTitle: { fontSize: 17, fontWeight: '700', marginBottom: 4 },
-  label: { fontSize: 13, fontWeight: '600', color: '#555' },
+  formTitle: { ...typography.titleMd, marginBottom: 4 },
+  label: { ...typography.labelLg },
   input: {
-    backgroundColor: 'white',
+    backgroundColor: colors.inputSurface,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
+    borderColor: colors.outline,
+    borderRadius: radii.sm,
     paddingHorizontal: 12,
     paddingVertical: Platform.select({ ios: 12, android: 10 }),
-    fontSize: 16,
-    color: '#111',
+    ...typography.bodyLg,
+    color: colors.onSurface,
   },
   rowButtons: { flexDirection: 'row', gap: 10, marginTop: 10 },
   actionBtn: {
     paddingVertical: 10,
     paddingHorizontal: 14,
-    borderRadius: 10,
+    borderRadius: radii.sm,
     alignItems: 'center',
     borderWidth: 1,
   },
-  actionText: { fontSize: 14, fontWeight: '600', color: '#333' },
-  editAction: { backgroundColor: '#fff', borderColor: '#ddd' },
-  deleteAction: { backgroundColor: '#fff', borderColor: '#f3c8c8' },
-  cancelAction: { backgroundColor: '#fff', borderColor: '#ddd' },
-  saveAction: { backgroundColor: '#1a73e8', borderColor: '#1a73e8' },
+  actionText: { ...typography.titleSm },
+  editAction: { backgroundColor: colors.surfaceContainerHigh, borderColor: colors.outline },
+  deleteAction: { backgroundColor: colors.errorContainer, borderColor: colors.errorContainer },
+  cancelAction: { backgroundColor: colors.surfaceContainerHigh, borderColor: colors.outline },
+  saveAction: { backgroundColor: colors.primary, borderColor: colors.primary },
   addBtn: {
     paddingVertical: 14,
-    borderRadius: 12,
+    borderRadius: radii.md,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#1a73e8',
+    borderColor: colors.secondary,
     borderStyle: 'dashed',
-    backgroundColor: '#fff',
+    backgroundColor: colors.surfaceContainerLow,
   },
-  addBtnText: { fontSize: 15, fontWeight: '700', color: '#1a73e8' },
+  addBtnText: { ...typography.titleSm, color: colors.secondary },
 });

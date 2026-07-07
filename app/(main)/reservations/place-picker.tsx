@@ -1,10 +1,19 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, ActivityIndicator, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  Pressable,
+  ActivityIndicator,
+  StyleSheet,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
 import { usePendingReservation } from '@/providers/PendingReservationContext';
 import ParkingMapPicker, { hasIsolatedGap } from '@/components/ParkingMapPicker';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
+import StepProgress from '@/components/StepProgress';
+import { AppAlert } from '@/components/AppAlert';
 
 type Place = { id: number; name: string };
 
@@ -24,8 +33,12 @@ export default function PlacePickerScreen() {
 
   useEffect(() => {
     async function load() {
-      const [placesRes, occupiedRes] = await Promise.all([
-        supabase.from('places').select('id, name').eq('is_active', true).order('id'),
+      const [placesRes, occupiedRes, maintenanceRes] = await Promise.all([
+        supabase
+          .from('places')
+          .select('id, name')
+          .eq('is_active', true)
+          .order('id'),
         supabase
           .from('reservations')
           .select('place_ids')
@@ -33,6 +46,11 @@ export default function PlacePickerScreen() {
           .eq('payment_status', 'paid')
           .lt('start_date', endDate)
           .gt('end_date', startDate),
+        supabase
+          .from('maintenance_blocks')
+          .select('place_id')
+          .lt('starts_on', endDate)
+          .gt('ends_on', startDate),
       ]);
 
       setPlaces((placesRes.data ?? []) as Place[]);
@@ -40,6 +58,9 @@ export default function PlacePickerScreen() {
       const occ = new Set<number>();
       for (const r of occupiedRes.data ?? []) {
         for (const pid of (r.place_ids as number[]) ?? []) occ.add(pid);
+      }
+      for (const b of (maintenanceRes.data ?? []) as { place_id: number }[]) {
+        occ.add(b.place_id);
       }
       setOccupiedIds(occ);
       setLoading(false);
@@ -55,12 +76,11 @@ export default function PlacePickerScreen() {
     const isSelected = selectedIds.includes(id);
 
     if (isSelected) {
-      // Deselecting: check if removal creates a gap
       const next = selectedIds.filter((x) => x !== id);
       const topGap = hasIsolatedGap(topRow, occupiedIds, next);
       const botGap = hasIsolatedGap(botRow, occupiedIds, next);
       if (topGap || botGap) {
-        Alert.alert(
+        AppAlert.alert(
           'Plaza aislada',
           'Deseleccionar esta plaza dejaría otra plaza totalmente aislada entre reservas. Ajusta tu selección.',
         );
@@ -69,18 +89,17 @@ export default function PlacePickerScreen() {
       setSelectedIds(next);
     } else {
       if (selectedIds.length >= numPlaces) {
-        Alert.alert(
+        AppAlert.alert(
           'Límite alcanzado',
           `Solo puedes seleccionar ${numPlaces} plaza${numPlaces !== 1 ? 's' : ''}.`,
         );
         return;
       }
-      // Selecting: check if addition creates a gap
       const next = [...selectedIds, id];
       const topGap = hasIsolatedGap(topRow, occupiedIds, next);
       const botGap = hasIsolatedGap(botRow, occupiedIds, next);
       if (topGap || botGap) {
-        Alert.alert(
+        AppAlert.alert(
           'Plaza aislada',
           'Esta selección dejaría una plaza libre aislada entre dos reservas. Elige plazas contiguas.',
         );
@@ -93,30 +112,37 @@ export default function PlacePickerScreen() {
   const handleConfirm = () => {
     if (!canConfirm) return;
     setPending((prev) => ({ ...prev, selectedPlaceIds: selectedIds }));
-    router.push('/(screens)/reservation-summary');
+    router.push('/(main)/reservations/reservation-summary');
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FC' }}>
-      <View style={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 }}>
-        <Text style={{ fontSize: 22, fontWeight: '700', marginBottom: 4 }}>
-          Elige tus plazas
-        </Text>
-        <Text style={{ fontSize: 13, color: '#888' }}>
-          Selecciona exactamente {numPlaces} plaza{numPlaces !== 1 ? 's' : ''} contigua{numPlaces !== 1 ? 's' : ''}.
+    <SafeAreaView style={styles.safe}>
+      <StepProgress current={4} />
+      <View style={styles.header}>
+        <Pressable onPress={() => router.back()} style={{ paddingVertical: 4, alignSelf: 'flex-start' }}>
+          <Text style={{ ...typography.titleSm, color: colors.secondary }}>‹ Volver</Text>
+        </Pressable>
+        <Text style={[styles.title, { marginTop: 4 }]}>Elige tus plazas</Text>
+        <Text style={styles.subtitle}>
+          Selecciona exactamente {numPlaces} plaza
+          {numPlaces !== 1 ? 's' : ''} contigua{numPlaces !== 1 ? 's' : ''}.
         </Text>
         {selectedIds.length > 0 && (
-          <Text style={{ fontSize: 13, color: '#1A73E8', marginTop: 4, fontWeight: '600' }}>
-            Seleccionadas: {selectedIds.sort((a, b) => a - b).map((id) => `P${id}`).join(', ')}
-            {' '}({selectedIds.length}/{numPlaces})
+          <Text style={styles.selectionHint}>
+            Seleccionadas:{' '}
+            {selectedIds
+              .sort((a, b) => a - b)
+              .map((id) => `P${id}`)
+              .join(', ')}{' '}
+            ({selectedIds.length}/{numPlaces})
           </Text>
         )}
       </View>
 
-      <View style={{ flex: 1, paddingHorizontal: 12 }}>
+      <View style={styles.map}>
         {loading ? (
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-            <ActivityIndicator size="large" />
+          <View style={styles.loader}>
+            <ActivityIndicator size="large" color={colors.primary} />
           </View>
         ) : (
           <ParkingMapPicker
@@ -128,19 +154,16 @@ export default function PlacePickerScreen() {
         )}
       </View>
 
-      <View style={{ padding: 20 }}>
+      <View style={styles.footer}>
         <Pressable
           onPress={handleConfirm}
           disabled={!canConfirm}
-          style={({ pressed }) => ({
-            backgroundColor: '#111',
-            paddingVertical: 16,
-            borderRadius: 14,
-            alignItems: 'center',
-            opacity: !canConfirm || pressed ? 0.4 : 1,
-          })}
+          style={({ pressed }) => [
+            styles.btn,
+            (!canConfirm || pressed) && styles.btnDisabled,
+          ]}
         >
-          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>
+          <Text style={styles.btnText}>
             {canConfirm
               ? `Confirmar ${numPlaces} plaza${numPlaces !== 1 ? 's' : ''} →`
               : `Selecciona ${numPlaces - selectedIds.length} más`}
@@ -150,3 +173,31 @@ export default function PlacePickerScreen() {
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.background },
+  header: {
+    paddingHorizontal: spacing['2xl'],
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.md,
+  },
+  title: { ...typography.headlineMd, marginBottom: spacing.xs },
+  subtitle: { ...typography.bodyMd },
+  selectionHint: {
+    ...typography.titleSm,
+    color: colors.primary,
+    marginTop: spacing.xs,
+  },
+  map: { flex: 1, paddingHorizontal: spacing.md },
+  loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  footer: { padding: spacing['2xl'] },
+  btn: {
+    backgroundColor: colors.primary,
+    paddingVertical: 16,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    ...shadow.sm,
+  },
+  btnDisabled: { opacity: 0.4 },
+  btnText: { ...typography.titleMd, color: colors.onPrimary },
+});

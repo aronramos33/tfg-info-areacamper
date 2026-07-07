@@ -5,7 +5,6 @@ import {
   ScrollView,
   TextInput,
   Pressable,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -20,11 +19,14 @@ import { usePendingReservation } from '@/providers/PendingReservationContext';
 import { nightsBetween } from '@/components/utils/dates';
 import { formatCents } from '@/components/utils/money';
 import { vehicleDisplayName } from '@/components/utils/vehicle';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
+import StepProgress from '@/components/StepProgress';
+import { AppAlert } from '@/components/AppAlert';
 
 function normalizeBirthDate(raw: string): string | null {
   if (!raw) return null;
   const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (!m) return null; // formato inválido → null, PostgreSQL lo acepta como NULL
+  if (!m) return null;
   return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
 }
 
@@ -78,7 +80,6 @@ export default function ReservationSummaryScreen() {
 
   const basePerPlace = nights * pending.nightlyCents;
 
-  // Extras cost for a single place config
   const calcExtras = (cfg: typeof pending.placeConfigs[0]) => {
     let total = 0;
     if (cfg.numPets > 0 && petExtra) {
@@ -109,18 +110,17 @@ export default function ReservationSummaryScreen() {
   const handlePay = async () => {
     if (!session) return;
 
-    if (!holder.full_name.trim()) { Alert.alert('Nombre requerido', 'Indica el nombre del titular.'); return; }
-    if (!holder.dni.trim()) { Alert.alert('Documento requerido', 'Indica el DNI/NIE/Pasaporte del titular.'); return; }
-    if (!holder.phone.trim()) { Alert.alert('Teléfono requerido', 'Indica un teléfono de contacto.'); return; }
+    if (!holder.full_name.trim()) { AppAlert.alert('Nombre requerido', 'Indica el nombre del titular.'); return; }
+    if (!holder.dni.trim()) { AppAlert.alert('Documento requerido', 'Indica el DNI/NIE/Pasaporte del titular.'); return; }
+    if (!holder.phone.trim()) { AppAlert.alert('Teléfono requerido', 'Indica un teléfono de contacto.'); return; }
 
     setPending(prev => ({ ...prev, holder }));
 
     if (!session?.user?.id) {
-      Alert.alert('Sesión requerida', 'Inicia sesión para continuar.');
+      AppAlert.alert('Sesión requerida', 'Inicia sesión para continuar.');
       return;
     }
 
-    // ─── Construir payloads (extras, travelers, vehicles_snapshot) ─────────
     const extrasPayload = pending.placeConfigs.flatMap((cfg, placeIndex) => {
       const rows: any[] = [];
       if (cfg.numPets > 0 && petExtra) {
@@ -162,7 +162,6 @@ export default function ReservationSummaryScreen() {
 
     setPaying(true);
     try {
-      // ─── 1) Pre-crear reserva en BD con status='pending' ─────────────────
       const { data: reservationRow, error: insErr } = await supabase
         .from('reservations')
         .insert({
@@ -192,13 +191,12 @@ export default function ReservationSummaryScreen() {
 
       if (insErr || !reservationRow) {
         console.warn('reservation insert error:', insErr);
-        Alert.alert('Error', 'No se pudo crear la reserva. Inténtalo de nuevo.');
+        AppAlert.alert('Error', 'No se pudo crear la reserva. Inténtalo de nuevo.');
         return;
       }
 
       const reservationId = reservationRow.id as number;
 
-      // ─── 2) Insertar travelers ───────────────────────────────────────────
       const travelerRows = pending.placeConfigs.flatMap((cfg, placeIndex) =>
         (cfg.guests ?? [])
           .filter(g => g.full_name?.trim())
@@ -224,14 +222,12 @@ export default function ReservationSummaryScreen() {
         const { error: travErr } = await supabase.from('travelers').insert(travelerRows);
         if (travErr) {
           console.warn('travelers insert error:', travErr);
-          // Limpiar reserva pending huérfana
           await supabase.from('reservations').delete().eq('id', reservationId);
-          Alert.alert('Error', 'No se pudieron guardar los datos de los viajeros. Comprueba que todos los campos son correctos.');
+          AppAlert.alert('Error', 'No se pudieron guardar los datos de los viajeros. Comprueba que todos los campos son correctos.');
           return;
         }
       }
 
-      // ─── 3) Insertar reservation_extras ──────────────────────────────────
       if (extrasPayload.length > 0) {
         const { error: extErr } = await supabase.from('reservation_extras').insert(
           extrasPayload.map(e => ({
@@ -246,14 +242,9 @@ export default function ReservationSummaryScreen() {
         );
         if (extErr) {
           console.warn('extras insert error:', extErr);
-          // No bloquear el flujo — los extras son secundarios
         }
       }
 
-      // ─── 4) Crear sesión de Stripe ───────────────────────────────────────
-      // Generamos return_url AQUÍ para que el backend use exactamente el mismo
-      // esquema/host que openAuthSessionAsync va a escuchar. Así no dependemos
-      // de EXPO_GO_BASE_URL en el servidor para el flujo create.
       const redirectBase = Linking.createURL('/stripe-redirect');
       console.log('[pay] redirectBase:', redirectBase);
 
@@ -263,33 +254,31 @@ export default function ReservationSummaryScreen() {
       );
 
       if (fnError || !fnData?.url) {
-        Alert.alert('Error', fnError?.message ?? 'No se pudo iniciar el pago.');
+        AppAlert.alert('Error', fnError?.message ?? 'No se pudo iniciar el pago.');
         return;
       }
 
-      // ─── 5) Guardar reservation_id en AsyncStorage (fallback ante OTA reload) ─
       await AsyncStorage.setItem('pending_post_payment_reservation_id', String(reservationId));
 
-      // ─── 6) Abrir Stripe y esperar resultado ─────────────────────────────
       console.log('[pay] abriendo Stripe:', fnData.url);
       const result = await WebBrowser.openAuthSessionAsync(fnData.url, redirectBase);
       console.log('[pay] browser cerrado, result.type:', result.type);
 
       if (result.type === 'success') {
-        // stripe-success redirigió a redirectBase → pago completado.
-        // stripe-redirect.tsx absorbe el deep link si el SO lo dispara (Android).
-        // El detalle de la reserva hace polling hasta que el webhook confirme.
+        await AsyncStorage.removeItem('pending_post_payment_reservation_id');
         resetPending();
-        router.replace(`/(main)/qr/${reservationId}` as any);
+        router.replace({
+          pathname: '/(screens)/booking-success',
+          params: { reservationId: String(reservationId) },
+        } as any);
       } else {
-        // Usuario cerró el browser o canceló el pago — no navegar.
         console.log('[pay] pago no completado (result.type:', result.type, ')');
         await AsyncStorage.removeItem('pending_post_payment_reservation_id');
-        Alert.alert('Pago no completado', 'Puedes intentarlo de nuevo.');
+        AppAlert.alert('Pago no completado', 'Puedes intentarlo de nuevo.');
       }
     } catch (e) {
       console.warn('handlePay error:', e);
-      Alert.alert('Error', 'Ha ocurrido un problema al crear la reserva.');
+      AppAlert.alert('Error', 'Ha ocurrido un problema al crear la reserva.');
     } finally {
       setPaying(false);
     }
@@ -297,8 +286,8 @@ export default function ReservationSummaryScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" />
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
@@ -308,16 +297,19 @@ export default function ReservationSummaryScreen() {
   const numPlaces = pending.selectedPlaceIds.length;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F8F9FC' }}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 48 }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <StepProgress current={5} />
+      <Pressable onPress={() => router.back()} style={{ paddingHorizontal: spacing['2xl'], paddingVertical: spacing.xs, alignSelf: 'flex-start' }}>
+        <Text style={{ ...typography.titleSm, color: colors.secondary }}>‹ Volver</Text>
+      </Pressable>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing['2xl'], paddingTop: spacing.xs, paddingBottom: 48 }}>
 
-        {/* Title */}
-        <Text style={{ fontSize: 24, fontWeight: '800', color: '#111', marginBottom: 20 }}>
+        <Text style={{ ...typography.headlineMd, marginBottom: spacing['2xl'] }}>
           Resumen de tu reserva
         </Text>
 
         {/* ── ESTANCIA ── */}
-        <Label>Estancia</Label>
+        <SectionLabel>Estancia</SectionLabel>
         <Card>
           <DataRow label="Entrada" value={start.format('ddd, D MMM YYYY')} />
           <Divider />
@@ -327,7 +319,7 @@ export default function ReservationSummaryScreen() {
         </Card>
 
         {/* ── TITULAR ── */}
-        <Label>Titular</Label>
+        <SectionLabel>Titular</SectionLabel>
         <Card>
           {holderExpanded ? (
             <>
@@ -335,6 +327,7 @@ export default function ReservationSummaryScreen() {
                 value={holder.full_name}
                 onChangeText={v => setHolder(h => ({ ...h, full_name: v }))}
                 placeholder="Nombre y apellidos *"
+                placeholderTextColor={colors.onSurfaceVariant}
                 autoCapitalize="words"
                 style={inputStyle}
               />
@@ -342,6 +335,7 @@ export default function ReservationSummaryScreen() {
                 value={holder.dni}
                 onChangeText={v => setHolder(h => ({ ...h, dni: v }))}
                 placeholder="DNI / NIE / Pasaporte *"
+                placeholderTextColor={colors.onSurfaceVariant}
                 autoCapitalize="characters"
                 autoCorrect={false}
                 style={[inputStyle, { marginTop: 8 }]}
@@ -350,41 +344,41 @@ export default function ReservationSummaryScreen() {
                 value={holder.phone}
                 onChangeText={v => setHolder(h => ({ ...h, phone: v }))}
                 placeholder="Teléfono *"
+                placeholderTextColor={colors.onSurfaceVariant}
                 keyboardType="phone-pad"
                 style={[inputStyle, { marginTop: 8 }]}
               />
               <Pressable
                 onPress={() => setHolderExpanded(false)}
-                style={{ marginTop: 12, alignSelf: 'flex-end', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, backgroundColor: '#111' }}
+                style={{ marginTop: 12, alignSelf: 'flex-end', paddingHorizontal: 14, paddingVertical: 7, borderRadius: radii.sm, backgroundColor: colors.primary }}
               >
-                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Guardar</Text>
+                <Text style={{ ...typography.titleSm, color: colors.onPrimary }}>Guardar</Text>
               </Pressable>
             </>
           ) : (
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <View>
-                <Text style={{ fontSize: 15, fontWeight: '700', color: '#111' }}>
+                <Text style={typography.titleMd}>
                   {holder.full_name || 'Sin nombre'}
                 </Text>
-                <Text style={{ fontSize: 13, color: '#888', marginTop: 2 }}>
+                <Text style={{ ...typography.bodyMd, marginTop: 2 }}>
                   DNI · {holder.dni || '—'}
                 </Text>
               </View>
               <Pressable
                 onPress={() => setHolderExpanded(true)}
-                style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, backgroundColor: '#F2F4F8' }}
+                style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: radii.sm, backgroundColor: colors.surfaceContainerHigh, borderWidth: 1, borderColor: colors.outline }}
               >
-                <Text style={{ fontWeight: '700', fontSize: 13, color: '#111' }}>Editar</Text>
+                <Text style={typography.titleSm}>Editar</Text>
               </Pressable>
             </View>
           )}
         </Card>
 
         {/* ── PLAZAS RESERVADAS ── */}
-        <Label>Plazas reservadas ({numPlaces})</Label>
+        <SectionLabel>Plazas reservadas ({numPlaces})</SectionLabel>
 
         {pending.placeConfigs.map((cfg, i) => {
-          const placeId = pending.selectedPlaceIds[i];
           const sel = cfg.vehicleSelection;
           const vehicleName = sel?.type === 'saved'
             ? vehicleDisplayName(sel.vehicle)
@@ -401,17 +395,15 @@ export default function ReservationSummaryScreen() {
 
           return (
             <Card key={i} style={{ marginBottom: 10 }}>
-              {/* Badge + vehículo */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                <View style={{ backgroundColor: '#111', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
-                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>Plaza {i + 1}</Text>
+                <View style={{ backgroundColor: colors.primary, borderRadius: radii.sm, paddingHorizontal: 10, paddingVertical: 5 }}>
+                  <Text style={{ ...typography.titleSm, color: colors.onPrimary }}>Plaza {i + 1}</Text>
                 </View>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: '#111', flexShrink: 1 }}>
+                <Text style={{ ...typography.titleSm, flexShrink: 1 }}>
                   {vehicleName}{vehiclePlate ? ` · ${vehiclePlate}` : ''}
                 </Text>
               </View>
 
-              {/* Info de la plaza */}
               <PlaceInfoLine text={`${cfg.numGuests} huésped${cfg.numGuests !== 1 ? 'es' : ''}`} />
               {cfg.numPets > 0 && petExtra && (
                 <PlaceInfoLine
@@ -434,7 +426,7 @@ export default function ReservationSummaryScreen() {
         })}
 
         {/* ── DESGLOSE DE PRECIOS ── */}
-        <Label>Desglose de precios</Label>
+        <SectionLabel>Desglose de precios</SectionLabel>
         <Card>
           {pending.placeConfigs.map((cfg, i) => {
             const placeBase = basePerPlace;
@@ -442,13 +434,10 @@ export default function ReservationSummaryScreen() {
 
             return (
               <View key={i} style={{ marginBottom: i < pending.placeConfigs.length - 1 ? 10 : 0 }}>
-                {/* Plaza base */}
                 <PriceRow
                   label={`Plaza ${i + 1} — ${nights} noche${nights !== 1 ? 's' : ''} × ${formatCents(pending.nightlyCents)}`}
                   value={formatCents(placeBase)}
-                  bold={false}
                 />
-                {/* Electricidad */}
                 {cfg.electricidad && powerExtra && (
                   <PriceRow
                     label={`+ Electricidad × ${nights} noche${nights !== 1 ? 's' : ''} × ${formatCents(powerExtra.unit_amount_cents)}`}
@@ -460,7 +449,6 @@ export default function ReservationSummaryScreen() {
                     indent
                   />
                 )}
-                {/* Mascotas */}
                 {cfg.numPets > 0 && petExtra && (
                   <PriceRow
                     label={`+ ${cfg.numPets} mascota${cfg.numPets !== 1 ? 's' : ''} × ${nights} noche${nights !== 1 ? 's' : ''} × ${formatCents(petExtra.unit_amount_cents)}`}
@@ -472,7 +460,6 @@ export default function ReservationSummaryScreen() {
                     indent
                   />
                 )}
-                {/* Viajeros extra */}
                 {extraPersons > 0 && personExtra && (
                   <PriceRow
                     label={`+ ${extraPersons} viajero${extraPersons !== 1 ? 's' : ''} extra × ${nights} noche${nights !== 1 ? 's' : ''} × ${formatCents(personExtra.unit_amount_cents)}`}
@@ -488,17 +475,16 @@ export default function ReservationSummaryScreen() {
             );
           })}
 
-          {/* Total */}
-          <View style={{ height: 1, backgroundColor: '#E5E7EB', marginVertical: 14 }} />
+          <View style={{ height: 1, backgroundColor: colors.outline, marginVertical: 14 }} />
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={{ fontSize: 15, fontWeight: '800', color: '#111' }}>TOTAL (IVA incluido)</Text>
-            <Text style={{ fontSize: 18, fontWeight: '800', color: '#111' }}>{formatCents(grandTotal)}</Text>
+            <Text style={typography.titleMd}>TOTAL (IVA incluido)</Text>
+            <Text style={{ ...typography.titleLg, fontSize: 18 }}>{formatCents(grandTotal)}</Text>
           </View>
         </Card>
 
         {/* ── POLÍTICA DE CANCELACIÓN ── */}
-        <View style={{ backgroundColor: '#FFFBEB', borderRadius: 14, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: '#FDE68A' }}>
-          <Text style={{ fontSize: 13, fontWeight: '700', color: '#92400E', marginBottom: 10 }}>
+        <View style={{ backgroundColor: colors.warningContainer, borderRadius: radii.md, padding: spacing.lg, marginBottom: spacing['2xl'], borderWidth: 1, borderColor: colors.warning }}>
+          <Text style={{ ...typography.titleSm, color: colors.warningText, marginBottom: 10 }}>
             Política de cancelación
           </Text>
           <BulletLine text=">7 días antes → Reembolso total" />
@@ -511,11 +497,15 @@ export default function ReservationSummaryScreen() {
           onPress={handlePay}
           disabled={paying}
           style={({ pressed }) => ({
-            backgroundColor: '#111', paddingVertical: 18, borderRadius: 14,
-            alignItems: 'center', opacity: paying || pressed ? 0.7 : 1,
+            backgroundColor: colors.primary,
+            paddingVertical: 18,
+            borderRadius: radii.md,
+            alignItems: 'center',
+            opacity: paying || pressed ? 0.7 : 1,
+            ...shadow.sm,
           })}
         >
-          <Text style={{ color: '#fff', fontWeight: '800', fontSize: 17 }}>
+          <Text style={{ ...typography.titleLg, color: colors.onPrimary }}>
             {paying ? 'Abriendo pago…' : `Confirmar y pagar  →  ${formatCents(grandTotal)}`}
           </Text>
         </Pressable>
@@ -527,9 +517,9 @@ export default function ReservationSummaryScreen() {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function Label({ children }: { children: React.ReactNode }) {
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <Text style={{ fontSize: 11, fontWeight: '700', color: '#aaa', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8, marginTop: 4 }}>
+    <Text style={{ ...typography.labelSm, marginBottom: 8, marginTop: 4 }}>
       {children}
     </Text>
   );
@@ -538,8 +528,11 @@ function Label({ children }: { children: React.ReactNode }) {
 function Card({ children, style }: { children: React.ReactNode; style?: object }) {
   return (
     <View style={[{
-      backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 16,
-      elevation: 1, shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 4, shadowOffset: { width: 0, height: 1 },
+      backgroundColor: colors.surfaceContainerLow,
+      borderRadius: radii.md,
+      padding: spacing.lg,
+      marginBottom: spacing.lg,
+      ...shadow.sm,
     }, style]}>
       {children}
     </View>
@@ -547,14 +540,14 @@ function Card({ children, style }: { children: React.ReactNode; style?: object }
 }
 
 function Divider() {
-  return <View style={{ height: 1, backgroundColor: '#F2F4F8', marginVertical: 10 }} />;
+  return <View style={{ height: 1, backgroundColor: colors.outlineVariant, marginVertical: 10 }} />;
 }
 
 function DataRow({ label, value, dimValue = false }: { label: string; value: string; dimValue?: boolean }) {
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-      <Text style={{ fontSize: 14, fontWeight: '600', color: '#111' }}>{label}</Text>
-      <Text style={{ fontSize: 13, color: dimValue ? '#aaa' : '#555', textAlign: 'right', flexShrink: 1, marginLeft: 8 }}>
+      <Text style={typography.titleSm}>{label}</Text>
+      <Text style={{ ...typography.bodyMd, textAlign: 'right', flexShrink: 1, marginLeft: 8, opacity: dimValue ? 0.6 : 1 }}>
         {value}
       </Text>
     </View>
@@ -564,19 +557,19 @@ function DataRow({ label, value, dimValue = false }: { label: string; value: str
 function PlaceInfoLine({ text, extra, dim = false }: { text: string; extra?: string; dim?: boolean }) {
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginBottom: 4 }}>
-      <Text style={{ fontSize: 13, color: dim ? '#aaa' : '#444' }}>{text}</Text>
-      {extra && <Text style={{ fontSize: 12, color: '#888' }}>{extra}</Text>}
+      <Text style={{ ...typography.bodyMd, color: dim ? colors.onSurfaceVariant : colors.onSurface }}>{text}</Text>
+      {extra && <Text style={typography.bodyMd}>{extra}</Text>}
     </View>
   );
 }
 
-function PriceRow({ label, value, bold = false, indent = false }: { label: string; value: string; bold?: boolean; indent?: boolean }) {
+function PriceRow({ label, value, indent = false }: { label: string; value: string; indent?: boolean }) {
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 3, paddingLeft: indent ? 10 : 0 }}>
-      <Text style={{ fontSize: indent ? 12 : 13, color: indent ? '#888' : '#555', flex: 1, flexWrap: 'wrap' }}>
+      <Text style={{ fontSize: indent ? 12 : 13, color: indent ? colors.onSurfaceVariant : colors.onSurface, flex: 1, flexWrap: 'wrap', fontFamily: 'PlusJakartaSans_400Regular' }}>
         {label}
       </Text>
-      <Text style={{ fontSize: indent ? 12 : 13, fontWeight: bold ? '800' : '600', color: '#111', marginLeft: 8 }}>
+      <Text style={{ fontSize: indent ? 12 : 13, fontFamily: 'PlusJakartaSans_600SemiBold', color: colors.onSurface, marginLeft: 8 }}>
         {value}
       </Text>
     </View>
@@ -586,12 +579,19 @@ function PriceRow({ label, value, bold = false, indent = false }: { label: strin
 function BulletLine({ text }: { text: string }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 6 }}>
-      <Text style={{ color: '#92400E', fontSize: 13 }}>•</Text>
-      <Text style={{ fontSize: 13, color: '#78350F', flex: 1 }}>{text}</Text>
+      <Text style={{ ...typography.bodyMd, color: colors.warningText }}>•</Text>
+      <Text style={{ ...typography.bodyMd, color: colors.warningText, flex: 1 }}>{text}</Text>
     </View>
   );
 }
 
 const inputStyle = {
-  backgroundColor: '#F2F4F8', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11, fontSize: 14, color: '#111',
+  backgroundColor: colors.inputSurface,
+  borderWidth: 1,
+  borderColor: colors.outline,
+  borderRadius: radii.sm,
+  paddingHorizontal: 12,
+  paddingVertical: 11,
+  ...typography.bodyLg,
+  color: colors.onSurface,
 };

@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../../lib/supabase';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
 
 const LOCATION_ADDRESS = 'Calle Ametler 8, 46728 Xauxa, Valencia';
 const MAPS_URL = Platform.select({
@@ -56,7 +57,7 @@ export default function ServiceDetail() {
   if (loading) {
     return (
       <SafeAreaView style={styles.center}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
@@ -64,7 +65,7 @@ export default function ServiceDetail() {
   if (!service) {
     return (
       <SafeAreaView style={styles.center}>
-        <Text>No se ha encontrado este servicio.</Text>
+        <Text style={typography.bodyMd}>No se ha encontrado este servicio.</Text>
       </SafeAreaView>
     );
   }
@@ -72,7 +73,7 @@ export default function ServiceDetail() {
   const isLocation = service.id === 'ubicacion';
 
   return (
-    <SafeAreaView style={{ flex: 1 }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <ScrollView contentContainerStyle={styles.container}>
         {service.image_url ? (
           <Image source={{ uri: service.image_url }} style={styles.image} />
@@ -125,82 +126,52 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: colors.background,
   },
 
-  container: {
-    paddingBottom: 40,
-  },
+  container: { paddingBottom: 40 },
 
   image: {
     width: '100%',
     height: 260,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
-    backgroundColor: '#eee',
+    borderBottomLeftRadius: radii.lg,
+    borderBottomRightRadius: radii.lg,
+    backgroundColor: colors.surfaceContainerHigh,
   },
-
-  imagePlaceholder: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  imagePlaceholder: { justifyContent: 'center', alignItems: 'center' },
 
   content: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
   },
 
-  title: {
-    fontSize: 26,
-    fontWeight: '700',
-    marginBottom: 16,
-  },
+  title: { ...typography.headlineLg, marginBottom: 16 },
 
   addressCard: {
-    backgroundColor: '#F7F8FB',
-    borderRadius: 14,
-    padding: 16,
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.md,
+    padding: spacing.lg,
     marginBottom: 14,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    ...shadow.sm,
   },
-  addressLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#9CA3AF',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  addressText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111',
-  },
+  addressLabel: { ...typography.labelSm, marginBottom: 4 },
+  addressText: { ...typography.titleMd },
 
   mapsButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 14,
+    backgroundColor: colors.primary,
+    borderRadius: radii.md,
     paddingVertical: 14,
     alignItems: 'center',
     marginBottom: 20,
+    ...shadow.sm,
   },
-  mapsButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '700',
-  },
+  mapsButtonText: { ...typography.titleMd, color: colors.onPrimary },
 
-  description: {
-    fontSize: 16,
-    lineHeight: 22,
-    color: '#444',
-    marginBottom: 20,
-  },
+  description: { ...typography.bodyLg, lineHeight: 24, marginBottom: 20 },
 
   notice: {
     marginTop: 20,
-    color: 'red',
-    fontWeight: '700',
-    fontSize: 16,
+    ...typography.titleSm,
+    color: colors.error,
   },
 });

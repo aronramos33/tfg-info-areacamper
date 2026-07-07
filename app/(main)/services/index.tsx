@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../providers/AuthProvider';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
 
 type Service = {
   id: string;
@@ -36,12 +37,8 @@ export default function ServicesIndex() {
 
   const { height: screenHeight } = useWindowDimensions();
   const scrollRef = useRef<ScrollView | null>(null);
-
-  // ✅ Posición Y de cada sección (guardada en refs)
   const internalYRef = useRef(0);
   const externalYRef = useRef(0);
-
-  // ✅ Flag para evitar que onScroll pise el tab durante scroll animado
   const isAutoScrollingRef = useRef(false);
 
   useEffect(() => {
@@ -50,12 +47,10 @@ export default function ServicesIndex() {
         .from('services')
         .select('*')
         .order('order_index', { ascending: true });
-
       if (error) console.warn('[services]', error);
       setServices(data ?? []);
       setLoading(false);
     };
-
     load();
   }, []);
 
@@ -63,48 +58,29 @@ export default function ServicesIndex() {
     () => (isOwner ? services : services.filter((s) => s.is_active)),
     [isOwner, services],
   );
-
-  const internal = useMemo(
-    () => visibleServices.filter((s) => !s.is_external),
-    [visibleServices],
-  );
-  const external = useMemo(
-    () => visibleServices.filter((s) => s.is_external),
-    [visibleServices],
-  );
-
+  const internal = useMemo(() => visibleServices.filter((s) => !s.is_external), [visibleServices]);
+  const external = useMemo(() => visibleServices.filter((s) => s.is_external), [visibleServices]);
   const emptyAll = internal.length === 0 && external.length === 0;
 
-  // ✅ Lógica única para decidir tab según scroll
   const updateTabFromY = (y: number) => {
     if (external.length === 0) {
       if (activeTab !== 'internal') setActiveTab('internal');
       return;
     }
-
     const extY = externalYRef.current;
     if (!extY || extY <= 0) return;
-
-    // La sección activa es la más cercana al scroll actual
     const distInternal = Math.abs(y - internalYRef.current);
     const distExternal = Math.abs(y - extY);
     const nearest = distInternal <= distExternal ? 'internal' : 'external';
-
     if (nearest !== activeTab) setActiveTab(nearest);
   };
 
-  // ✅ Tap en tabs: scroll + set tab (sin que onScroll lo pise)
   const scrollToTab = (tab: Tab) => {
     setActiveTab(tab);
-
     isAutoScrollingRef.current = true;
     const y = tab === 'internal' ? internalYRef.current : externalYRef.current;
     scrollRef.current?.scrollTo({ y, animated: true });
-
-    // Soltamos el “bloqueo” tras la animación
-    setTimeout(() => {
-      isAutoScrollingRef.current = false;
-    }, 450);
+    setTimeout(() => { isAutoScrollingRef.current = false; }, 450);
   };
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -115,7 +91,7 @@ export default function ServicesIndex() {
   if (loading) {
     return (
       <SafeAreaView style={styles.center}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
   }
@@ -130,7 +106,7 @@ export default function ServicesIndex() {
         <Image source={{ uri: service.image_url }} style={styles.cardImage} />
       ) : (
         <View style={[styles.cardImage, styles.cardImagePlaceholder]}>
-          <Text style={{ color: '#666' }}>IMG</Text>
+          <Text style={{ color: colors.onSurfaceVariant }}>IMG</Text>
         </View>
       )}
 
@@ -151,28 +127,18 @@ export default function ServicesIndex() {
   );
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F7F8FB' }}>
-      {/* Tabs “ancla” */}
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={styles.tabsWrapper}>
         <Text style={styles.pageTitle}>Servicios</Text>
         <View style={styles.toggleRow}>
           <Pressable
             onPress={() => scrollToTab('internal')}
-            style={[
-              styles.toggleBtn,
-              activeTab === 'internal' && styles.toggleBtnActive,
-            ]}
+            style={[styles.toggleBtn, activeTab === 'internal' && styles.toggleBtnActive]}
           >
-            <Text
-              style={[
-                styles.toggleText,
-                activeTab === 'internal' && styles.toggleTextActive,
-              ]}
-            >
+            <Text style={[styles.toggleText, activeTab === 'internal' && styles.toggleTextActive]}>
               Dentro del camping
             </Text>
           </Pressable>
-
           <Pressable
             onPress={() => scrollToTab('external')}
             style={[
@@ -182,12 +148,7 @@ export default function ServicesIndex() {
             ]}
             disabled={external.length === 0}
           >
-            <Text
-              style={[
-                styles.toggleText,
-                activeTab === 'external' && styles.toggleTextActive,
-              ]}
-            >
+            <Text style={[styles.toggleText, activeTab === 'external' && styles.toggleTextActive]}>
               Servicios exteriores
             </Text>
           </Pressable>
@@ -199,51 +160,33 @@ export default function ServicesIndex() {
         contentContainerStyle={[styles.container, { paddingBottom: screenHeight }]}
         onScroll={onScroll}
         onScrollEndDrag={(e) => updateTabFromY(e.nativeEvent.contentOffset.y)}
-        onMomentumScrollEnd={(e) =>
-          updateTabFromY(e.nativeEvent.contentOffset.y)
-        }
+        onMomentumScrollEnd={(e) => updateTabFromY(e.nativeEvent.contentOffset.y)}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
       >
         {emptyAll ? (
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>
-              No hay servicios disponibles en este momento.
-            </Text>
+            <Text style={styles.emptyText}>No hay servicios disponibles en este momento.</Text>
           </View>
         ) : (
           <>
-            {/* Sección: Dentro */}
-            <View
-              onLayout={(e) => {
-                internalYRef.current = e.nativeEvent.layout.y;
-              }}
-            >
+            <View onLayout={(e) => { internalYRef.current = e.nativeEvent.layout.y; }}>
               <Text style={styles.sectionTitle}>Dentro del camping</Text>
-              {internal.length === 0 ? (
-                <Text style={styles.sectionEmpty}>
-                  No hay servicios internos disponibles.
-                </Text>
-              ) : (
-                internal.map(renderServiceCard)
-              )}
+              {internal.length === 0
+                ? <Text style={styles.sectionEmpty}>No hay servicios internos disponibles.</Text>
+                : internal.map(renderServiceCard)
+              }
             </View>
 
-            {/* Sección: Exteriores */}
             <View
-              onLayout={(e) => {
-                externalYRef.current = e.nativeEvent.layout.y;
-              }}
+              onLayout={(e) => { externalYRef.current = e.nativeEvent.layout.y; }}
               style={{ marginTop: 18 }}
             >
               <Text style={styles.sectionTitle}>Servicios exteriores</Text>
-              {external.length === 0 ? (
-                <Text style={styles.sectionEmpty}>
-                  No hay servicios exteriores disponibles.
-                </Text>
-              ) : (
-                external.map(renderServiceCard)
-              )}
+              {external.length === 0
+                ? <Text style={styles.sectionEmpty}>No hay servicios exteriores disponibles.</Text>
+                : external.map(renderServiceCard)
+              }
             </View>
           </>
         )}
@@ -253,87 +196,70 @@ export default function ServicesIndex() {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background },
 
   tabsWrapper: {
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
     paddingTop: 14,
     paddingBottom: 8,
-    backgroundColor: '#F7F8FB',
+    backgroundColor: colors.background,
   },
-  pageTitle: {
-    fontSize: 26,
-    fontWeight: '800',
-    marginBottom: 12,
-    color: '#111',
-  },
+  pageTitle: { ...typography.headlineLg, marginBottom: 12 },
   toggleRow: {
     flexDirection: 'row',
-    backgroundColor: '#e8eaf0',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceContainerHigh,
+    borderRadius: radii.md,
     padding: 4,
   },
   toggleBtn: {
     flex: 1,
     paddingVertical: 10,
-    borderRadius: 10,
+    borderRadius: radii.sm,
     alignItems: 'center',
   },
   toggleBtnActive: {
-    backgroundColor: 'white',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 2,
+    backgroundColor: colors.surfaceContainerLow,
+    ...shadow.sm,
   },
-  toggleText: { fontSize: 14, fontWeight: '600', color: '#888' },
-  toggleTextActive: { color: '#007AFF' },
+  toggleText: { ...typography.titleSm, color: colors.onSurfaceVariant },
+  toggleTextActive: { color: colors.secondary },
 
   container: {
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
     paddingTop: 8,
     gap: 12,
   },
 
   empty: { flex: 1, alignItems: 'center', paddingTop: 40 },
-  emptyText: { fontSize: 16, color: '#888', textAlign: 'center' },
+  emptyText: { ...typography.bodyMd, textAlign: 'center' },
 
   sectionTitle: {
     marginTop: 6,
     marginBottom: 10,
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#555',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    ...typography.labelSm,
   },
-  sectionEmpty: { color: '#888', marginBottom: 8 },
+  sectionEmpty: { ...typography.bodyMd, marginBottom: 8 },
 
   card: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 14,
-    backgroundColor: 'white',
-    borderRadius: 14,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.lg,
+    ...shadow.sm,
     marginBottom: 12,
   },
   cardImage: {
     width: 60,
     height: 60,
-    borderRadius: 10,
+    borderRadius: radii.md,
     marginRight: 14,
-    backgroundColor: '#eee',
+    backgroundColor: colors.surfaceContainerHigh,
   },
   cardImagePlaceholder: { justifyContent: 'center', alignItems: 'center' },
   cardContent: { flex: 1 },
-  cardTitle: { fontSize: 16, fontWeight: '600', marginBottom: 4 },
-  cardSubtitle: { fontSize: 14, color: '#555' },
-  badgeOff: { marginTop: 4, fontSize: 12, color: 'red', fontWeight: '600' },
-  arrow: { fontSize: 26, color: '#aaa', marginLeft: 10 },
+  cardTitle: { ...typography.titleMd, marginBottom: 4 },
+  cardSubtitle: { ...typography.bodyMd },
+  badgeOff: { marginTop: 4, ...typography.labelSm, color: colors.error, letterSpacing: 0 },
+  arrow: { fontSize: 26, color: colors.onSurfaceVariant, marginLeft: 10 },
 });

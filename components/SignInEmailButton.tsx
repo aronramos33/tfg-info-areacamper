@@ -1,12 +1,14 @@
 import React, { useCallback, useState } from 'react';
-import { Pressable, Text, ActivityIndicator, View } from 'react-native';
+import { Pressable, Text, ActivityIndicator, View, StyleSheet } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { colors, radii, shadow, typography } from '@/lib/theme';
 
 type Props = {
   email: string;
   password: string;
   label?: string;
-  onSuccess?: () => void; // opcional: se llama si el login fue OK
+  onSuccess?: () => void;
+  disabled?: boolean;
 };
 
 const SignInEmailButton: React.FC<Props> = ({
@@ -14,6 +16,7 @@ const SignInEmailButton: React.FC<Props> = ({
   password,
   label = 'Iniciar sesión',
   onSuccess,
+  disabled = false,
 }) => {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -26,13 +29,8 @@ const SignInEmailButton: React.FC<Props> = ({
     setLoading(true);
     setErr(null);
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-
-      // Tu AuthProvider recibirá la sesión vía onAuthStateChange
       if (data.session) onSuccess?.();
     } catch (e: any) {
       setErr(e?.message ?? 'No se pudo iniciar sesión');
@@ -45,33 +43,40 @@ const SignInEmailButton: React.FC<Props> = ({
     <View style={{ width: '100%' }}>
       <Pressable
         onPress={handlePress}
-        disabled={loading}
-        style={({ pressed }) => ({
-          opacity: pressed || loading ? 0.7 : 1,
-          backgroundColor: '#1a73e8',
-          paddingVertical: 14,
-          paddingHorizontal: 16,
-          borderRadius: 12,
-          alignItems: 'center',
-          justifyContent: 'center',
-        })}
+        disabled={loading || disabled}
+        style={({ pressed }) => [styles.btn, { opacity: pressed || loading || disabled ? 0.5 : 1 }]}
       >
-        {loading ? (
-          <ActivityIndicator />
-        ) : (
-          <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
-            {label}
-          </Text>
-        )}
+        {loading
+          ? <ActivityIndicator color={colors.onPrimary} />
+          : <Text style={styles.btnText}>{label}</Text>
+        }
       </Pressable>
 
-      {err ? (
-        <Text style={{ color: 'crimson', marginTop: 8, textAlign: 'center' }}>
-          {err}
-        </Text>
-      ) : null}
+      {err ? <Text style={styles.error}>{err}</Text> : null}
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  btn: {
+    backgroundColor: colors.primary,
+    paddingVertical: 15,
+    paddingHorizontal: 16,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.sm,
+  },
+  btnText: {
+    ...typography.titleMd,
+    color: colors.onPrimary,
+  },
+  error: {
+    ...typography.bodyMd,
+    color: colors.error,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+});
 
 export default SignInEmailButton;

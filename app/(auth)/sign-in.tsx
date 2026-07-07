@@ -8,7 +8,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
   Modal,
 } from 'react-native';
 import DateTimePicker, {
@@ -17,12 +16,15 @@ import DateTimePicker, {
 import { useRouter } from 'expo-router';
 import SignInEmailButton from '@/components/SignInEmailButton';
 import SignInButton from '@/components/SignInButton';
+import PrivacyModal from '@/components/PrivacyModal';
 import { supabase } from '@/lib/supabase';
 import {
   isValidDNINIE,
   isValidName,
   isValidLocalPhone,
 } from '@/components/utils/validation';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
+import { AppAlert } from '@/components/AppAlert';
 
 type Tab = 'signin' | 'signup';
 
@@ -58,11 +60,9 @@ export default function AuthScreen() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>('signin');
 
-  // Sign in
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // Sign up
   const [suEmail, setSuEmail] = useState('');
   const [suPassword, setSuPassword] = useState('');
   const [suRepeat, setSuRepeat] = useState('');
@@ -76,6 +76,8 @@ export default function AuthScreen() {
   const [showBirthPicker, setShowBirthPicker] = useState(false);
   const [gender, setGender] = useState<GenderValue>('');
   const [signUpLoading, setSignUpLoading] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
 
   const maxBirthDate = new Date(
     new Date().getFullYear() - 18,
@@ -87,53 +89,48 @@ export default function AuthScreen() {
     COUNTRY_CODES.find((c) => c.prefix === phonePrefix) ?? COUNTRY_CODES[0];
 
   const handleSignUp = async () => {
+    if (!termsAccepted) {
+      AppAlert.alert('Términos y condiciones', 'Debes aceptar los términos y condiciones para continuar.');
+      return;
+    }
     if (!suEmail.trim() || !suPassword.trim()) {
-      Alert.alert('Campos requeridos', 'El email y la contraseña son obligatorios.');
+      AppAlert.alert('Campos requeridos', 'El email y la contraseña son obligatorios.');
       return;
     }
     if (!isValidName(firstName)) {
-      Alert.alert(
-        'Nombre inválido',
-        'El nombre debe tener al menos 2 caracteres y solo puede contener letras.',
-      );
+      AppAlert.alert('Nombre inválido', 'El nombre debe tener al menos 2 caracteres y solo puede contener letras.');
       return;
     }
     if (!isValidName(lastName)) {
-      Alert.alert(
-        'Apellido inválido',
-        'El apellido debe tener al menos 2 caracteres y solo puede contener letras.',
-      );
+      AppAlert.alert('Apellido inválido', 'El apellido debe tener al menos 2 caracteres y solo puede contener letras.');
       return;
     }
     if (!dni.trim()) {
-      Alert.alert('Campos requeridos', 'El DNI/NIE es obligatorio.');
+      AppAlert.alert('Campos requeridos', 'El DNI/NIE es obligatorio.');
       return;
     }
     if (!isValidDNINIE(dni)) {
-      Alert.alert(
-        'DNI/NIE inválido',
-        'Comprueba el formato. DNI: 8 dígitos + letra (ej: 12345678Z). NIE: X/Y/Z + 7 dígitos + letra (ej: X1234567L).',
-      );
+      AppAlert.alert('DNI/NIE inválido', 'Comprueba el formato. DNI: 8 dígitos + letra (ej: 12345678Z). NIE: X/Y/Z + 7 dígitos + letra (ej: X1234567L).');
       return;
     }
     if (localPhone.trim() && !isValidLocalPhone(localPhone)) {
-      Alert.alert('Teléfono inválido', 'Introduce al menos 6 dígitos en el número.');
+      AppAlert.alert('Teléfono inválido', 'Introduce al menos 6 dígitos en el número.');
       return;
     }
     if (!birthDate) {
-      Alert.alert('Campos requeridos', 'La fecha de nacimiento es obligatoria.');
+      AppAlert.alert('Campos requeridos', 'La fecha de nacimiento es obligatoria.');
       return;
     }
     if (!gender) {
-      Alert.alert('Campos requeridos', 'Selecciona un género.');
+      AppAlert.alert('Campos requeridos', 'Selecciona un género.');
       return;
     }
     if (suPassword.length < 8) {
-      Alert.alert('Contraseña débil', 'Usa al menos 8 caracteres.');
+      AppAlert.alert('Contraseña débil', 'Usa al menos 8 caracteres.');
       return;
     }
     if (suPassword !== suRepeat) {
-      Alert.alert('Contraseñas distintas', 'Las contraseñas no coinciden.');
+      AppAlert.alert('Contraseñas distintas', 'Las contraseñas no coinciden.');
       return;
     }
 
@@ -165,13 +162,13 @@ export default function AuthScreen() {
           );
         if (profileError) console.warn('[sign-up] profile error', profileError);
       }
-      Alert.alert(
+      AppAlert.alert(
         '¡Cuenta creada!',
         'Revisa tu email para confirmar tu cuenta antes de iniciar sesión.',
         [{ text: 'OK', onPress: () => setActiveTab('signin') }],
       );
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'No se pudo crear la cuenta.');
+      AppAlert.alert('Error', e?.message ?? 'No se pudo crear la cuenta.');
     } finally {
       setSignUpLoading(false);
     }
@@ -191,7 +188,7 @@ export default function AuthScreen() {
           <Text style={styles.subtitle}>Tu acceso al área</Text>
         </View>
 
-        <SignInButton />
+        <SignInButton disabled={!termsAccepted} />
 
         <View style={styles.divider}>
           <View style={styles.dividerLine} />
@@ -230,7 +227,7 @@ export default function AuthScreen() {
                 keyboardType="email-address"
                 autoCorrect={false}
                 style={styles.input}
-                placeholderTextColor="#aaa"
+                placeholderTextColor={colors.onSurfaceVariant}
               />
             </View>
             <View style={styles.field}>
@@ -241,10 +238,27 @@ export default function AuthScreen() {
                 placeholder="••••••••"
                 secureTextEntry
                 style={styles.input}
-                placeholderTextColor="#aaa"
+                placeholderTextColor={colors.onSurfaceVariant}
               />
             </View>
-            <SignInEmailButton email={email} password={password} />
+            <Pressable
+              onPress={() => setTermsAccepted(!termsAccepted)}
+              style={styles.checkboxRow}
+            >
+              <View style={[styles.checkbox, termsAccepted && styles.checkboxChecked]}>
+                {termsAccepted && <Text style={styles.checkmark}>✓</Text>}
+              </View>
+              <Text style={styles.checkboxLabel}>
+                Acepto los{' '}
+                <Text
+                  style={styles.checkboxLink}
+                  onPress={() => setShowPrivacy(true)}
+                >
+                  términos y condiciones
+                </Text>
+              </Text>
+            </Pressable>
+            <SignInEmailButton email={email} password={password} disabled={!termsAccepted} />
           </View>
         ) : (
           <View style={styles.form}>
@@ -259,7 +273,7 @@ export default function AuthScreen() {
                 keyboardType="email-address"
                 autoCorrect={false}
                 style={styles.input}
-                placeholderTextColor="#aaa"
+                placeholderTextColor={colors.onSurfaceVariant}
               />
             </View>
             <View style={styles.field}>
@@ -270,7 +284,7 @@ export default function AuthScreen() {
                 placeholder="••••••••"
                 secureTextEntry
                 style={styles.input}
-                placeholderTextColor="#aaa"
+                placeholderTextColor={colors.onSurfaceVariant}
               />
             </View>
             <View style={styles.field}>
@@ -281,13 +295,12 @@ export default function AuthScreen() {
                 placeholder="••••••••"
                 secureTextEntry
                 style={styles.input}
-                placeholderTextColor="#aaa"
+                placeholderTextColor={colors.onSurfaceVariant}
               />
             </View>
 
             <Text style={[styles.sectionLabel, { marginTop: 16 }]}>DATOS PERSONALES</Text>
 
-            {/* Nombre + Apellido */}
             <View style={styles.row}>
               <View style={[styles.field, { flex: 1 }]}>
                 <Text style={styles.label}>Nombre *</Text>
@@ -297,7 +310,7 @@ export default function AuthScreen() {
                   placeholder="Juan"
                   autoCapitalize="words"
                   style={styles.input}
-                  placeholderTextColor="#aaa"
+                  placeholderTextColor={colors.onSurfaceVariant}
                 />
               </View>
               <View style={{ width: 12 }} />
@@ -309,12 +322,11 @@ export default function AuthScreen() {
                   placeholder="García"
                   autoCapitalize="words"
                   style={styles.input}
-                  placeholderTextColor="#aaa"
+                  placeholderTextColor={colors.onSurfaceVariant}
                 />
               </View>
             </View>
 
-            {/* DNI */}
             <View style={styles.field}>
               <Text style={styles.label}>DNI / NIE *</Text>
               <TextInput
@@ -323,11 +335,10 @@ export default function AuthScreen() {
                 placeholder="12345678Z"
                 autoCapitalize="characters"
                 style={styles.input}
-                placeholderTextColor="#aaa"
+                placeholderTextColor={colors.onSurfaceVariant}
               />
             </View>
 
-            {/* Teléfono con prefijo */}
             <View style={styles.field}>
               <Text style={styles.label}>Teléfono (opcional)</Text>
               <View style={styles.phoneRow}>
@@ -346,12 +357,11 @@ export default function AuthScreen() {
                   placeholder="600 000 000"
                   keyboardType="phone-pad"
                   style={[styles.input, { flex: 1 }]}
-                  placeholderTextColor="#aaa"
+                  placeholderTextColor={colors.onSurfaceVariant}
                 />
               </View>
             </View>
 
-            {/* Fecha de nacimiento */}
             <View style={styles.field}>
               <Text style={styles.label}>Fecha de nacimiento *</Text>
               {Platform.OS === 'ios' ? (
@@ -391,7 +401,6 @@ export default function AuthScreen() {
               )}
             </View>
 
-            {/* Género */}
             <View style={styles.field}>
               <Text style={styles.label}>Género *</Text>
               <View style={styles.genderGrid}>
@@ -421,11 +430,28 @@ export default function AuthScreen() {
               Podrás añadir tus vehículos desde tu perfil tras crear la cuenta.
             </Text>
             <Pressable
+              onPress={() => setTermsAccepted(!termsAccepted)}
+              style={styles.checkboxRow}
+            >
+              <View style={[styles.checkbox, termsAccepted && styles.checkboxChecked]}>
+                {termsAccepted && <Text style={styles.checkmark}>✓</Text>}
+              </View>
+              <Text style={styles.checkboxLabel}>
+                Acepto los{' '}
+                <Text
+                  style={styles.checkboxLink}
+                  onPress={() => setShowPrivacy(true)}
+                >
+                  términos y condiciones
+                </Text>
+              </Text>
+            </Pressable>
+            <Pressable
               onPress={handleSignUp}
-              disabled={signUpLoading}
+              disabled={signUpLoading || !termsAccepted}
               style={({ pressed }) => [
                 styles.submitBtn,
-                (pressed || signUpLoading) && { opacity: 0.7 },
+                (pressed || signUpLoading || !termsAccepted) && { opacity: 0.5 },
               ]}
             >
               <Text style={styles.submitText}>
@@ -439,13 +465,12 @@ export default function AuthScreen() {
           onPress={() => router.replace('/(main)/services')}
           style={{ alignItems: 'center', paddingTop: 28, paddingBottom: 4 }}
         >
-          <Text style={{ fontSize: 14, color: '#bbb', fontWeight: '500' }}>
-            Continuar sin cuenta
-          </Text>
+          <Text style={styles.skipText}>Continuar sin cuenta</Text>
         </Pressable>
       </ScrollView>
 
-      {/* Modal selector de prefijo */}
+      <PrivacyModal visible={showPrivacy} onClose={() => setShowPrivacy(false)} />
+
       <Modal
         visible={showPrefixModal}
         transparent
@@ -489,78 +514,67 @@ export default function AuthScreen() {
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
-    paddingHorizontal: 28,
+    paddingHorizontal: spacing['2xl'],
     paddingTop: 60,
-    paddingBottom: 48,
-    backgroundColor: '#fff',
+    paddingBottom: spacing['4xl'],
+    backgroundColor: colors.background,
   },
   header: {
-    marginBottom: 28,
+    marginBottom: spacing['2xl'],
     alignItems: 'center',
   },
   title: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: '#111',
+    ...typography.display,
+    color: colors.primary,
     marginBottom: 6,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#888',
+    ...typography.bodyLg,
+    color: colors.onSurfaceVariant,
   },
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginVertical: 16,
+    marginVertical: spacing.lg,
+    gap: spacing.md,
   },
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#e5e5e5',
+    backgroundColor: colors.outline,
   },
   dividerText: {
-    fontSize: 13,
-    color: '#aaa',
-    fontWeight: '500',
+    ...typography.labelMd,
   },
   tabs: {
     flexDirection: 'row',
-    borderRadius: 12,
-    backgroundColor: '#F7F8FB',
+    borderRadius: radii.md,
+    backgroundColor: colors.surfaceContainerHigh,
     padding: 4,
-    marginBottom: 20,
+    marginBottom: spacing.xl,
   },
   tab: {
     flex: 1,
     paddingVertical: 10,
-    borderRadius: 10,
+    borderRadius: radii.sm,
     alignItems: 'center',
   },
   tabActive: {
-    backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    backgroundColor: colors.surfaceContainerLow,
+    ...shadow.sm,
   },
   tabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#888',
+    ...typography.titleSm,
+    color: colors.onSurfaceVariant,
   },
   tabTextActive: {
-    color: '#111',
+    color: colors.onSurface,
   },
   form: {
     gap: 14,
   },
   sectionLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#aaa',
-    letterSpacing: 1,
+    ...typography.labelSm,
     marginBottom: 4,
   },
   field: {
@@ -570,19 +584,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#444',
+    ...typography.titleSm,
+    color: colors.onSurfaceVariant,
   },
   input: {
-    backgroundColor: '#F7F8FB',
+    backgroundColor: colors.inputSurface,
     borderWidth: 1,
-    borderColor: '#e5e5e5',
-    borderRadius: 12,
-    paddingHorizontal: 16,
+    borderColor: colors.outline,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.lg,
     paddingVertical: Platform.select({ ios: 14, android: 12 }),
-    fontSize: 16,
-    color: '#111',
+    ...typography.bodyLg,
   },
   phoneRow: {
     flexDirection: 'row',
@@ -593,32 +605,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#F7F8FB',
+    backgroundColor: colors.inputSurface,
     borderWidth: 1,
-    borderColor: '#e5e5e5',
-    borderRadius: 12,
+    borderColor: colors.outline,
+    borderRadius: radii.md,
     paddingHorizontal: 12,
     paddingVertical: Platform.select({ ios: 14, android: 12 }),
   },
   prefixText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#111',
+    ...typography.titleSm,
   },
   prefixArrow: {
     fontSize: 11,
-    color: '#aaa',
+    color: colors.onSurfaceVariant,
   },
   dateBtn: {
     justifyContent: 'center',
   },
   dateBtnText: {
-    fontSize: 16,
-    color: '#111',
+    ...typography.bodyLg,
   },
   dateBtnPlaceholder: {
-    fontSize: 16,
-    color: '#aaa',
+    ...typography.bodyLg,
+    color: colors.onSurfaceVariant,
   },
   genderGrid: {
     flexDirection: 'row',
@@ -628,63 +637,59 @@ const styles = StyleSheet.create({
   genderChip: {
     paddingHorizontal: 16,
     paddingVertical: 10,
-    borderRadius: 10,
+    borderRadius: radii.full,
+    backgroundColor: colors.inputSurface,
     borderWidth: 1.5,
-    borderColor: '#e5e5e5',
-    backgroundColor: '#F7F8FB',
+    borderColor: colors.outline,
   },
   genderChipActive: {
-    borderColor: '#1a73e8',
-    backgroundColor: '#EAF1FE',
+    backgroundColor: colors.secondaryContainer,
+    borderColor: colors.secondary,
   },
   genderChipText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#888',
+    ...typography.titleSm,
+    color: colors.onSurface,
   },
   genderChipTextActive: {
-    color: '#1a73e8',
+    color: colors.onSecondaryContainer,
   },
   submitBtn: {
-    backgroundColor: '#1a73e8',
-    borderRadius: 14,
+    backgroundColor: colors.primary,
+    borderRadius: radii.md,
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 8,
+    ...shadow.sm,
   },
   submitText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '700',
+    ...typography.titleMd,
+    color: colors.onPrimary,
   },
   helper: {
-    fontSize: 13,
-    color: '#888',
+    ...typography.bodyMd,
     fontStyle: 'italic',
+  },
+  skipText: {
+    ...typography.labelMd,
+    color: colors.onSurfaceVariant,
   },
   prefixOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: colors.overlay,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 32,
+    padding: spacing['3xl'],
   },
   prefixModal: {
-    backgroundColor: 'white',
-    borderRadius: 20,
-    padding: 20,
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.xl,
+    padding: spacing.xl,
     width: '100%',
     maxWidth: 340,
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    ...shadow.md,
   },
   prefixModalTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#111',
+    ...typography.titleLg,
     marginBottom: 14,
   },
   prefixOption: {
@@ -692,23 +697,51 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 13,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
   },
   prefixOptionActive: {
-    backgroundColor: '#EAF1FE',
+    backgroundColor: colors.surfaceContainerHigh,
     marginHorizontal: -8,
     paddingHorizontal: 8,
-    borderRadius: 8,
+    borderRadius: radii.sm,
   },
   prefixOptionLabel: {
-    fontSize: 16,
-    color: '#111',
-    fontWeight: '500',
+    ...typography.bodyLg,
   },
   prefixOptionCode: {
-    fontSize: 15,
-    color: '#888',
-    fontWeight: '600',
+    ...typography.titleSm,
+    color: colors.onSurfaceVariant,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: colors.outline,
+    backgroundColor: colors.inputSurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  checkmark: {
+    color: colors.onPrimary,
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  checkboxLabel: {
+    ...typography.bodyMd,
+    color: colors.onSurface,
+    flex: 1,
+  },
+  checkboxLink: {
+    color: colors.primary,
+    textDecorationLine: 'underline',
   },
 });
