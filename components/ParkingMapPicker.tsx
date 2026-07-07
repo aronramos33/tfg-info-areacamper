@@ -2,6 +2,38 @@ import React from 'react';
 import { ScrollView, View, Text } from 'react-native';
 import Svg, { Rect, Text as SvgText, G, Line } from 'react-native-svg';
 
+/**
+ * Returns true if the selection leaves a single free+unselected spot flanked
+ * on both sides by blocked (occupied or selected) spots.
+ * Runs the check on each row independently.
+ */
+export function hasIsolatedGap(
+  rowIds: number[],
+  occupiedIds: Set<number>,
+  selectedIds: number[],
+): boolean {
+  const blocked = (id: number) =>
+    occupiedIds.has(id) || selectedIds.includes(id);
+
+  let i = 0;
+  while (i < rowIds.length) {
+    if (!blocked(rowIds[i])) {
+      const seqStart = i;
+      while (i < rowIds.length && !blocked(rowIds[i])) i++;
+      const seqEnd = i - 1;
+      const seqLen = seqEnd - seqStart + 1;
+      const leftBlocked =
+        seqStart > 0 && blocked(rowIds[seqStart - 1]);
+      const rightBlocked =
+        seqEnd < rowIds.length - 1 && blocked(rowIds[seqEnd + 1]);
+      if (seqLen === 1 && leftBlocked && rightBlocked) return true;
+    } else {
+      i++;
+    }
+  }
+  return false;
+}
+
 interface Place {
   id: number;
   name: string;
@@ -137,21 +169,11 @@ export default function ParkingMapPicker({
             Pérgola
           </SvgText>
 
-          {/* Módulos servicios (center-right) */}
+          {/* Módulo servicios (center-right) */}
           <Rect
             x={440}
             y={78}
-            width={72}
-            height={50}
-            fill="#6B7280"
-            stroke="#4B5563"
-            strokeWidth={1}
-            rx={4}
-          />
-          <Rect
-            x={518}
-            y={78}
-            width={72}
+            width={150}
             height={50}
             fill="#6B7280"
             stroke="#4B5563"
@@ -159,7 +181,7 @@ export default function ParkingMapPicker({
             rx={4}
           />
           <SvgText
-            x={516}
+            x={515}
             y={107}
             fontSize={10}
             fontWeight="700"

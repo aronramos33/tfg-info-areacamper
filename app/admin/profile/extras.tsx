@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,7 +12,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { AppAlert } from '@/components/AppAlert';
 import { formatCents } from '@/components/utils/money';
+import { Ionicons } from '@expo/vector-icons';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
 
 type Extra = {
   id: number;
@@ -72,7 +74,7 @@ export default function AdminExtras() {
     if (!ev) return;
     const euros = parseFloat(ev.price.replace(',', '.').trim());
     if (isNaN(euros) || euros < 0) {
-      Alert.alert('Valor inválido', 'Introduce un precio válido (0 o mayor).');
+      AppAlert.alert('Valor inválido', 'Introduce un precio válido (0 o mayor).');
       return;
     }
     const cents = Math.round(euros * 100);
@@ -92,7 +94,7 @@ export default function AdminExtras() {
       );
       setExpandedId(null);
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'No se pudo guardar.');
+      AppAlert.alert('Error', e?.message ?? 'No se pudo guardar.');
     } finally {
       setSavingId(null);
     }
@@ -110,7 +112,7 @@ export default function AdminExtras() {
 
       <ScrollView contentContainerStyle={styles.container}>
         {loading ? (
-          <ActivityIndicator style={{ marginTop: 40 }} />
+          <ActivityIndicator style={{ marginTop: 40 }} color={colors.primary} />
         ) : (
           <View style={styles.card}>
             {extras.map((extra, i) => {
@@ -151,14 +153,13 @@ export default function AdminExtras() {
                       </Text>
                     </View>
 
-                    {/* Lápiz (solo cuando no estamos editando esta fila) */}
                     {!isExpanded && (
                       <Pressable
                         onPress={() => openEdit(extra)}
                         hitSlop={8}
                         style={styles.pencilBtn}
                       >
-                        <Text style={styles.pencilText}>✏️</Text>
+                        <Ionicons name="create-outline" size={18} color={colors.secondary} />
                       </Pressable>
                     )}
                   </View>
@@ -175,6 +176,7 @@ export default function AdminExtras() {
                           keyboardType="decimal-pad"
                           selectTextOnFocus
                           autoFocus
+                          placeholderTextColor={colors.onSurfaceVariant}
                         />
                         <Text style={styles.editUnit}>
                           € / {PRICING_LABEL[extra.pricing_type]}
@@ -186,8 +188,8 @@ export default function AdminExtras() {
                         <Switch
                           value={ev.is_active}
                           onValueChange={(v) => setField(extra.id, { is_active: v })}
-                          trackColor={{ true: '#34C759', false: '#e0e0e0' }}
-                          thumbColor="#fff"
+                          trackColor={{ true: colors.primary, false: colors.surfaceContainerHigh }}
+                          thumbColor={colors.onPrimary}
                         />
                       </View>
 
@@ -229,32 +231,35 @@ export default function AdminExtras() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f2f2f7' },
+  safe: { flex: 1, backgroundColor: colors.background },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
     paddingVertical: 12,
-    backgroundColor: '#fff',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e0e0e0',
+    backgroundColor: colors.background,
   },
   headerSide: { width: 70 },
-  headerBack: { color: '#007AFF', fontSize: 16 },
-  headerTitle: { fontSize: 17, fontWeight: '600', color: '#111' },
-  container: { padding: 16, paddingBottom: 40 },
-  card: { backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
+  headerBack: { ...typography.titleMd, color: colors.secondary },
+  headerTitle: { ...typography.titleLg },
+  container: { padding: spacing.lg, paddingBottom: 40 },
+  card: {
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.lg,
+    overflow: 'hidden',
+    ...shadow.sm,
+  },
   divider: {
     height: StyleSheet.hairlineWidth,
-    backgroundColor: '#e0e0e0',
-    marginLeft: 16,
+    backgroundColor: colors.outlineVariant,
+    marginLeft: spacing.lg,
   },
 
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
     paddingVertical: 14,
   },
   rowMain: { flex: 1 },
@@ -264,60 +269,51 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 3,
   },
-  rowName: { fontSize: 16, fontWeight: '600', color: '#111' },
-  rowSub: { fontSize: 13, color: '#8e8e93' },
-  badge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  badgeActive: { backgroundColor: '#d4edda' },
-  badgeInactive: { backgroundColor: '#f0f0f0' },
-  badgeText: { fontSize: 11, fontWeight: '600' },
-  badgeTextActive: { color: '#155724' },
-  badgeTextInactive: { color: '#888' },
+  rowName: { ...typography.titleSm },
+  rowSub: { ...typography.bodyMd },
+  badge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radii.sm },
+  badgeActive: { backgroundColor: colors.confirmedBg },
+  badgeInactive: { backgroundColor: colors.surfaceContainerHigh },
+  badgeText: { fontFamily: 'Inter_700Bold', fontSize: 11 },
+  badgeTextActive: { color: colors.confirmedText },
+  badgeTextInactive: { color: colors.onSurfaceVariant },
   pencilBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: '#eaeaea',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 34, height: 34, borderRadius: radii.sm,
+    backgroundColor: colors.surfaceContainerHigh,
+    alignItems: 'center', justifyContent: 'center',
     marginLeft: 8,
   },
-  pencilText: { fontSize: 15 },
 
   editArea: {
-    backgroundColor: '#f9f9f9',
-    paddingHorizontal: 16,
+    backgroundColor: colors.surfaceContainerHigh,
+    paddingHorizontal: spacing.lg,
     paddingVertical: 14,
     gap: 14,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#e0e0e0',
+    borderTopColor: colors.outlineVariant,
   },
   editRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  editLabel: { fontSize: 14, color: '#888', width: 56 },
+  editLabel: { ...typography.bodyMd, width: 56 },
   editInput: {
     flex: 1,
+    fontFamily: 'PlusJakartaSans_700Bold',
     fontSize: 20,
-    fontWeight: '600',
-    color: '#111',
-    borderBottomWidth: 1.5,
-    borderBottomColor: '#007AFF',
+    color: colors.onSurface,
+    borderBottomWidth: 2,
+    borderBottomColor: colors.primary,
     paddingVertical: 4,
   },
-  editUnit: { fontSize: 13, color: '#8e8e93' },
+  editUnit: { ...typography.bodyMd },
   editActions: { flexDirection: 'row', gap: 10 },
   cancelBtn: {
-    flex: 1,
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: 'center',
-    backgroundColor: '#e5e5ea',
+    flex: 1, borderRadius: radii.sm, paddingVertical: 10,
+    alignItems: 'center', backgroundColor: colors.surfaceContainerLow,
+    borderWidth: 1, borderColor: colors.outline,
   },
-  cancelBtnText: { color: '#111', fontSize: 15, fontWeight: '600' },
+  cancelBtnText: { ...typography.titleSm },
   saveBtn: {
-    flex: 1,
-    backgroundColor: '#007AFF',
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: 'center',
+    flex: 1, backgroundColor: colors.primary, borderRadius: radii.sm,
+    paddingVertical: 10, alignItems: 'center', ...shadow.sm,
   },
-  saveBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  saveBtnText: { ...typography.titleSm, color: colors.onPrimary },
 });

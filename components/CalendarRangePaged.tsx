@@ -152,7 +152,7 @@ export default function CalendarRangePaged({
             onClearDateRange(); /* padre se limpiará por el effect */
           }}
         >
-          <Text style={{ color: '#2563eb' }}>Borrar</Text>
+          <Text style={{ color: '#2563eb' }}>Limpiar</Text>
         </Pressable>
         <Pressable
           disabled={atEnd}

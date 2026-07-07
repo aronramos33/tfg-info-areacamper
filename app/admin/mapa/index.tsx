@@ -9,7 +9,6 @@ import {
   TextInput,
   Platform,
   Modal,
-  Alert,
 } from 'react-native';
 import DateTimePicker, {
   DateTimePickerEvent,
@@ -17,9 +16,11 @@ import DateTimePicker, {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
+import { AppAlert } from '../../../components/AppAlert';
 import ParkingMapPicker from '../../../components/ParkingMapPicker';
 import dayjs from 'dayjs';
 import isoWeek from 'dayjs/plugin/isoWeek';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
 
 dayjs.extend(isoWeek);
 
@@ -35,7 +36,6 @@ type Reservation = {
   payment_status: string;
   full_name: string | null;
   total_amount_cents: number | null;
-  user_id: string;
 };
 
 type MaintenanceBlock = {
@@ -70,7 +70,6 @@ export default function AdminMapaPlazas() {
     MaintenanceBlock[]
   >([]);
 
-  // Selector fecha — solo día o semana
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [filterDate, setFilterDate] = useState(dayjs().format('YYYY-MM-DD'));
   const [filterInput, setFilterInput] = useState(dayjs().format('DD/MM/YYYY'));
@@ -78,17 +77,30 @@ export default function AdminMapaPlazas() {
   const [filterWeek, setFilterWeek] = useState(
     dayjs().startOf('isoWeek').format('YYYY-MM-DD'),
   );
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
-  // Modal gestión plaza
+  const parsedFilterDate = useMemo(() => {
+    const [y, m, d] = filterDate.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }, [filterDate]);
+
+  const onPickerChange = (_: any, date?: Date) => {
+    setShowDatePicker(false);
+    if (date) {
+      const next = dayjs(date);
+      setFilterDate(next.format('YYYY-MM-DD'));
+      setFilterInput(next.format('DD/MM/YYYY'));
+      setFilterError('');
+    }
+  };
+
   const [selectedPlace, setSelectedPlace] = useState<number | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [newStatus, setNewStatus] = useState<PlaceStatus>('free');
-  // Fechas como YYYY-MM-DD internamente
   const [blockFrom, setBlockFrom] = useState(dayjs().format('YYYY-MM-DD'));
   const [blockTo, setBlockTo] = useState(
     dayjs().add(7, 'day').format('YYYY-MM-DD'),
   );
-  // Android: mostrar picker uno a la vez
   const [showFromPicker, setShowFromPicker] = useState(false);
   const [showToPicker, setShowToPicker] = useState(false);
   const [blockReason, setBlockReason] = useState('');
@@ -97,26 +109,19 @@ export default function AdminMapaPlazas() {
   // ── Load ───────────────────────────────────────────────────────────────────
   const load = async () => {
     setLoading(true);
-    const [placesRes, reservationsRes, maintenanceRes, ownersRes] =
-      await Promise.all([
-        supabase.from('places').select('*').order('id'),
-        supabase
-          .from('reservations')
-          .select(
-            'id,place_ids,num_places,start_date,end_date,payment_status,full_name,total_amount_cents,user_id',
-          )
-          .eq('payment_status', 'paid'),
-        supabase.from('maintenance_blocks').select('*'),
-        supabase.from('owners').select('user_id'),
-      ]);
-
-    const ownerIds = new Set((ownersRes.data ?? []).map((o: any) => o.user_id));
-    const allReservations = (
-      (reservationsRes.data ?? []) as Reservation[]
-    ).filter((r) => !ownerIds.has(r.user_id));
+    const [placesRes, reservationsRes, maintenanceRes] = await Promise.all([
+      supabase.from('places').select('*').order('id'),
+      supabase
+        .from('reservations')
+        .select(
+          'id,place_ids,num_places,start_date,end_date,payment_status,full_name,total_amount_cents',
+        )
+        .eq('payment_status', 'paid'),
+      supabase.from('maintenance_blocks').select('*'),
+    ]);
 
     setPlaces(placesRes.data ?? []);
-    setReservations(allReservations);
+    setReservations((reservationsRes.data ?? []) as Reservation[]);
     setMaintenanceBlocks((maintenanceRes.data ?? []) as MaintenanceBlock[]);
     setLoading(false);
   };
@@ -194,7 +199,6 @@ export default function AdminMapaPlazas() {
     });
   }, [reservations, periodStart, periodEnd]);
 
-  // ✅ Usa place_ids array con fallback a place_id legacy
   const getPlaceStatus = useCallback(
     (placeId: number): PlaceStatus => {
       const block = blocksInPeriod.find((b) => b.place_id === placeId);
@@ -231,8 +235,6 @@ export default function AdminMapaPlazas() {
       .map((p) => p.id),
   );
 
-  // ── Reservas del período (para lista) ─────────────────────────────────────
-  // solo las que NO son de mantenimiento (reservas reales)
   const reservasList = useMemo(
     () =>
       reservationsInPeriod
@@ -262,7 +264,6 @@ export default function AdminMapaPlazas() {
 
     try {
       if (newStatus === 'free') {
-        // Eliminar bloques activos en el período para esta plaza
         const activeBlocks = blocksInPeriod.filter(
           (b) => b.place_id === selectedPlace,
         );
@@ -274,7 +275,7 @@ export default function AdminMapaPlazas() {
         const to = dayjs(blockTo, 'YYYY-MM-DD', true);
 
         if (!from.isValid() || !to.isValid() || to.isBefore(from)) {
-          Alert.alert(
+          AppAlert.alert(
             'Fechas inválidas',
             'La fecha de fin debe ser posterior al inicio.',
           );
@@ -318,7 +319,7 @@ export default function AdminMapaPlazas() {
           }
 
           if (reasigned > 0) {
-            Alert.alert(
+            AppAlert.alert(
               'Plaza en mantenimiento',
               `${reasigned} reserva(s) reasignada(s) automáticamente.`,
             );
@@ -329,7 +330,7 @@ export default function AdminMapaPlazas() {
       setModalVisible(false);
       await load();
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'No se pudo guardar.');
+      AppAlert.alert('Error', e?.message ?? 'No se pudo guardar.');
     } finally {
       setSaving(false);
     }
@@ -344,12 +345,12 @@ export default function AdminMapaPlazas() {
   if (loading)
     return (
       <SafeAreaView style={styles.center}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F7F8FB' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.pageTitle}>Mapa de plazas</Text>
 
@@ -383,14 +384,9 @@ export default function AdminMapaPlazas() {
               <Text style={styles.arrowText}>‹</Text>
             </Pressable>
             {viewMode === 'day' ? (
-              <TextInput
-                value={filterInput}
-                onChangeText={handleFilterInput}
-                style={styles.dateInput}
-                placeholder="DD/MM/YYYY"
-                keyboardType="numeric"
-                maxLength={10}
-              />
+              <Pressable onPress={() => setShowDatePicker(true)} style={styles.periodLabelBox}>
+                <Text style={styles.periodLabelText}>{filterInput}</Text>
+              </Pressable>
             ) : (
               <View style={styles.periodLabelBox}>
                 <Text style={styles.periodLabelText}>{periodLabel()}</Text>
@@ -410,36 +406,64 @@ export default function AdminMapaPlazas() {
           )}
         </View>
 
+        {showDatePicker && Platform.OS === 'ios' && (
+          <Modal transparent animationType="slide" onRequestClose={() => setShowDatePicker(false)}>
+            <Pressable style={styles.pickerBackdrop} onPress={() => setShowDatePicker(false)}>
+              <View style={styles.pickerCard} onStartShouldSetResponder={() => true}>
+                <View style={styles.pickerHandle} />
+                <DateTimePicker
+                  value={parsedFilterDate}
+                  mode="date"
+                  display="inline"
+                  onChange={onPickerChange}
+                  locale="es-ES"
+                  accentColor={colors.primary}
+                  themeVariant="light"
+                />
+              </View>
+            </Pressable>
+          </Modal>
+        )}
+        {showDatePicker && Platform.OS === 'android' && (
+          <DateTimePicker
+            value={parsedFilterDate}
+            mode="date"
+            display="default"
+            onChange={onPickerChange}
+            accentColor={colors.primary}
+          />
+        )}
+
         {/* Leyenda / resumen */}
         <View style={styles.summaryRow}>
-          <View style={[styles.summaryBadge, { backgroundColor: '#4CAF50' }]}>
-            <Text style={styles.summaryNum}>{freeCount}</Text>
-            <Text style={styles.summaryLabel}>Libres</Text>
+          <View style={[styles.summaryBadge, { backgroundColor: colors.confirmedBg }]}>
+            <Text style={[styles.summaryNum, { color: colors.confirmedText }]}>{freeCount}</Text>
+            <Text style={[styles.summaryLabel, { color: colors.confirmedText }]}>Libres</Text>
           </View>
-          <View style={[styles.summaryBadge, { backgroundColor: '#f44336' }]}>
-            <Text style={styles.summaryNum}>{occupiedCount}</Text>
-            <Text style={styles.summaryLabel}>Ocupadas</Text>
+          <View style={[styles.summaryBadge, { backgroundColor: colors.cancelledBg }]}>
+            <Text style={[styles.summaryNum, { color: colors.cancelledText }]}>{occupiedCount}</Text>
+            <Text style={[styles.summaryLabel, { color: colors.cancelledText }]}>Ocupadas</Text>
           </View>
           {maintCount > 0 && (
-            <View style={[styles.summaryBadge, { backgroundColor: '#FF9800' }]}>
-              <Text style={styles.summaryNum}>{maintCount}</Text>
-              <Text style={styles.summaryLabel}>Mant.</Text>
+            <View style={[styles.summaryBadge, { backgroundColor: colors.warningContainer }]}>
+              <Text style={[styles.summaryNum, { color: colors.warningText }]}>{maintCount}</Text>
+              <Text style={[styles.summaryLabel, { color: colors.warningText }]}>Mant.</Text>
             </View>
           )}
-          <View style={[styles.summaryBadge, { backgroundColor: '#9C27B0' }]}>
-            <Text style={styles.summaryNum}>
+          <View style={[styles.summaryBadge, { backgroundColor: colors.modifiedBg }]}>
+            <Text style={[styles.summaryNum, { color: colors.modifiedText }]}>
               {totalPlaces > 0
                 ? `${Math.round((occupiedCount / totalPlaces) * 100)}%`
                 : '0%'}
             </Text>
-            <Text style={styles.summaryLabel}>Ocupación</Text>
+            <Text style={[styles.summaryLabel, { color: colors.modifiedText }]}>Ocupación</Text>
           </View>
         </View>
 
         {/* Mapa de plazas */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>
-            🅿️ Estado de plazas — {periodLabel()}
+            Estado de plazas — {periodLabel()}
           </Text>
           <Text style={styles.cardSubtitle}>
             Toca una plaza para cambiar su estado
@@ -457,7 +481,7 @@ export default function AdminMapaPlazas() {
         {/* Lista reservas del período */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>
-            📋 Reservas del período ({reservasList.length})
+            Reservas del período ({reservasList.length})
           </Text>
           {reservasList.length === 0 ? (
             <Text style={styles.emptyText}>
@@ -475,7 +499,7 @@ export default function AdminMapaPlazas() {
                   onPress={() => router.push(`/admin/places/${r.id}`)}
                   style={({ pressed }) => [
                     styles.reservationRow,
-                    pressed && { backgroundColor: '#F7F8FB' },
+                    pressed && { backgroundColor: colors.surfaceContainerHigh },
                   ]}
                 >
                   <View style={{ flex: 1 }}>
@@ -702,95 +726,91 @@ export default function AdminMapaPlazas() {
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  container: { padding: 16, paddingBottom: 48 },
-  pageTitle: { fontSize: 26, fontWeight: '800', marginBottom: 16 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background },
+  container: { padding: spacing.lg, paddingBottom: 48 },
+  pageTitle: { ...typography.headlineLg, marginBottom: 16 },
 
   toggleRow: {
     flexDirection: 'row',
-    backgroundColor: '#e8eaf0',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceContainerHigh,
+    borderRadius: radii.md,
     padding: 4,
     marginBottom: 14,
   },
   toggleBtn: {
     flex: 1,
     paddingVertical: 9,
-    borderRadius: 10,
+    borderRadius: radii.sm,
     alignItems: 'center',
   },
   toggleBtnActive: {
-    backgroundColor: 'white',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
+    backgroundColor: colors.surfaceContainerLow,
+    ...shadow.sm,
   },
-  toggleText: { fontSize: 13, fontWeight: '600', color: '#888' },
-  toggleTextActive: { color: '#007AFF' },
+  toggleText: { ...typography.titleSm, color: colors.onSurfaceVariant },
+  toggleTextActive: { color: colors.secondary },
 
   card: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 16,
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
     marginBottom: 14,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
+    ...shadow.sm,
   },
-  cardTitle: { fontSize: 15, fontWeight: '800', marginBottom: 4 },
-  cardSubtitle: { fontSize: 13, color: '#888', marginBottom: 10 },
-  emptyText: { fontSize: 14, color: '#aaa', marginTop: 4 },
+  cardTitle: { ...typography.titleMd, marginBottom: 4 },
+  cardSubtitle: { ...typography.bodyMd, marginBottom: 10 },
+  emptyText: { ...typography.bodyMd, marginTop: 4 },
 
   dateRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   arrowBtn: {
     width: 40,
     height: 40,
-    borderRadius: 10,
-    backgroundColor: '#EEF4FF',
+    borderRadius: radii.sm,
+    backgroundColor: colors.surfaceContainerHigh,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  arrowText: { fontSize: 22, color: '#007AFF', fontWeight: '700' },
+  arrowText: { fontSize: 22, color: colors.secondary, fontFamily: 'PlusJakartaSans_700Bold' },
   dateInput: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 17,
-    fontWeight: '700',
+    ...typography.titleMd,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
+    borderColor: colors.outline,
+    borderRadius: radii.sm,
     paddingVertical: Platform.select({ ios: 10, android: 8 }),
-    backgroundColor: '#F7F8FB',
+    backgroundColor: colors.inputSurface,
   },
   periodLabelBox: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
+    borderColor: colors.outline,
+    borderRadius: radii.sm,
     paddingVertical: Platform.select({ ios: 10, android: 8 }),
-    backgroundColor: '#F7F8FB',
+    backgroundColor: colors.inputSurface,
   },
-  periodLabelText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#111',
+  periodLabelText: { ...typography.titleMd },
+  dateError: { color: colors.error, fontSize: 12, marginTop: 6 },
+  pickerBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
+  pickerCard: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: radii.xl,
+    borderTopRightRadius: radii.xl,
+    paddingBottom: 34,
+    paddingTop: 8,
   },
-  dateError: { color: 'red', fontSize: 12, marginTop: 6 },
+  pickerHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.outline, alignSelf: 'center', marginBottom: 8 },
   todayBtn: {
     marginTop: 10,
     alignSelf: 'center',
     paddingHorizontal: 16,
     paddingVertical: 6,
-    backgroundColor: '#EEF4FF',
-    borderRadius: 999,
+    backgroundColor: colors.surfaceContainerHigh,
+    borderRadius: radii.full,
   },
-  todayBtnText: { color: '#007AFF', fontWeight: '700', fontSize: 13 },
+  todayBtnText: { color: colors.secondary, fontFamily: 'PlusJakartaSans_700Bold', fontSize: 13 },
 
   summaryRow: {
     flexDirection: 'row',
@@ -799,50 +819,20 @@ const styles = StyleSheet.create({
   },
   summaryBadge: {
     flex: 1,
-    borderRadius: 14,
+    borderRadius: radii.md,
     paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   summaryNum: {
+    fontFamily: 'PlusJakartaSans_800ExtraBold',
     fontSize: 22,
-    fontWeight: '800',
-    color: 'white',
   },
   summaryLabel: {
+    fontFamily: 'Inter_600SemiBold',
     fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.85)',
     marginTop: 2,
   },
-
-  placesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 10,
-    marginBottom: 8,
-  },
-  placeCell: {
-    width: '20%',
-    aspectRatio: 1,
-    padding: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  placeCellInner: {
-    flex: 1,
-    width: '100%',
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  placeCellText: {
-    color: 'white',
-    fontWeight: '800',
-    fontSize: 13,
-  },
-  legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  legendItem: { fontSize: 13, color: '#555' },
 
   reservationRow: {
     flexDirection: 'row',
@@ -850,60 +840,47 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
+    borderTopColor: colors.outlineVariant,
     paddingHorizontal: 4,
   },
-  reservationName: { fontSize: 14, fontWeight: '700', color: '#111' },
-  reservationDates: { fontSize: 13, color: '#666', marginTop: 2 },
+  reservationName: { ...typography.titleSm },
+  reservationDates: { ...typography.bodyMd, marginTop: 2 },
   reservationPlaza: {
     fontSize: 12,
-    color: '#007AFF',
+    color: colors.secondary,
     marginTop: 2,
-    fontWeight: '600',
+    fontFamily: 'Inter_600SemiBold',
   },
-  reservationAmount: { fontSize: 14, fontWeight: '800', color: '#333' },
-  chevron: { fontSize: 20, color: '#ccc', fontWeight: '700' },
+  reservationAmount: { ...typography.titleSm },
+  chevron: { fontSize: 20, color: colors.onSurfaceVariant, fontFamily: 'PlusJakartaSans_700Bold' },
 
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: colors.overlay,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    padding: spacing['2xl'],
   },
   modalBox: {
-    backgroundColor: 'white',
-    borderRadius: 20,
-    padding: 24,
+    backgroundColor: colors.background,
+    borderRadius: radii.xl,
+    padding: spacing['2xl'],
     width: '100%',
     maxWidth: 380,
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    ...shadow.md,
   },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#111',
-    marginBottom: 6,
-  },
+  modalTitle: { ...typography.headlineMd, marginBottom: 6 },
   modalCurrentBadge: {
-    backgroundColor: '#F7F8FB',
-    borderRadius: 10,
+    backgroundColor: colors.surfaceContainerHigh,
+    borderRadius: radii.sm,
     paddingHorizontal: 12,
     paddingVertical: 6,
     marginBottom: 16,
     alignSelf: 'flex-start',
   },
-  modalCurrentText: { fontSize: 13, color: '#555', fontWeight: '600' },
-  modalSectionLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#888',
-    marginBottom: 8,
-  },
+  modalCurrentText: { ...typography.labelLg },
+  modalSectionLabel: { ...typography.labelMd, marginBottom: 8 },
+
   radioRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -915,18 +892,19 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 11,
     borderWidth: 2,
-    borderColor: '#ccc',
+    borderColor: colors.outline,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  radioOuterActive: { borderColor: '#007AFF' },
+  radioOuterActive: { borderColor: colors.primary },
   radioInner: {
     width: 11,
     height: 11,
     borderRadius: 6,
-    backgroundColor: '#007AFF',
+    backgroundColor: colors.primary,
   },
-  radioLabel: { fontSize: 16, color: '#111', fontWeight: '500' },
+  radioLabel: { ...typography.bodyLg },
+
   blockFields: { marginTop: 14 },
   blockDatesRow: {
     flexDirection: 'row',
@@ -934,64 +912,54 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
   },
-  blockDatesSep: {
-    fontSize: 16,
-    color: '#aaa',
-    fontWeight: '700',
-    paddingBottom: 10,
-  },
-  fieldLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#888',
-    marginBottom: 4,
-  },
+  blockDatesSep: { ...typography.titleMd, color: colors.onSurfaceVariant, paddingBottom: 10 },
+  fieldLabel: { ...typography.labelMd, marginBottom: 4 },
   input: {
-    backgroundColor: '#F7F8FB',
+    backgroundColor: colors.inputSurface,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
+    borderColor: colors.outline,
+    borderRadius: radii.sm,
     paddingHorizontal: 12,
     paddingVertical: Platform.select({ ios: 10, android: 8 }),
-    fontSize: 14,
-    color: '#111',
+    ...typography.bodyMd,
+    color: colors.onSurface,
   },
   reasignHint: {
     marginTop: 10,
     fontSize: 12,
-    color: '#FF9800',
-    fontWeight: '600',
+    color: colors.warning,
+    fontFamily: 'Inter_600SemiBold',
     lineHeight: 18,
   },
   datePickerBtn: {
-    backgroundColor: '#F7F8FB',
+    backgroundColor: colors.inputSurface,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
+    borderColor: colors.outline,
+    borderRadius: radii.sm,
     paddingHorizontal: 12,
     paddingVertical: Platform.select({ ios: 10, android: 10 }),
     alignItems: 'center',
   },
-  datePickerText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#111',
-  },
+  datePickerText: { ...typography.titleSm },
+
   modalButtons: { flexDirection: 'row', gap: 10, marginTop: 20 },
   btnCancel: {
     flex: 1,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: colors.surfaceContainerHigh,
     paddingVertical: 13,
-    borderRadius: 12,
+    borderRadius: radii.md,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.outline,
   },
-  btnCancelText: { fontWeight: '700', color: '#333', fontSize: 15 },
+  btnCancelText: { ...typography.titleSm },
   btnSave: {
     flex: 1,
-    backgroundColor: '#007AFF',
+    backgroundColor: colors.primary,
     paddingVertical: 13,
-    borderRadius: 12,
+    borderRadius: radii.md,
     alignItems: 'center',
+    ...shadow.sm,
   },
-  btnSaveText: { fontWeight: '700', color: 'white', fontSize: 15 },
+  btnSaveText: { ...typography.titleSm, color: colors.onPrimary },
 });

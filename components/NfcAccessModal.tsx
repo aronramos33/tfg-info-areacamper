@@ -7,7 +7,9 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
 
 type NfcAccessModalProps = {
   visible: boolean;
@@ -42,7 +44,6 @@ export default function NfcAccessModal({
     setMessage('');
     setTagLabel('');
 
-    // Simula el tiempo de lectura del tag NFC (~1.5s)
     await new Promise((res) => setTimeout(res, 1500));
     if (cancelledRef.current) return;
 
@@ -86,24 +87,24 @@ export default function NfcAccessModal({
 
           {phase === 'scanning' && (
             <View style={styles.body}>
-              <Text style={styles.bigIcon}>📡</Text>
+              <Ionicons name="radio-outline" size={52} color={colors.secondary} />
               <Text style={styles.bodyText}>
                 Acerca tu móvil al lector NFC de la barrera.
               </Text>
-              <ActivityIndicator style={{ marginTop: 16 }} />
+              <ActivityIndicator style={{ marginTop: 16 }} color={colors.primary} />
             </View>
           )}
 
           {phase === 'validating' && (
             <View style={styles.body}>
-              <ActivityIndicator />
+              <ActivityIndicator color={colors.primary} />
               <Text style={styles.subtle}>Validando acceso…</Text>
             </View>
           )}
 
           {phase === 'success' && (
             <View style={styles.body}>
-              <Text style={[styles.bigIcon, { color: '#1a7f37' }]}>✓</Text>
+              <Ionicons name="checkmark-circle" size={52} color={colors.confirmedText} />
               <Text style={styles.successText}>BARRERA ABIERTA</Text>
               {tagLabel ? <Text style={styles.subtle}>{tagLabel}</Text> : null}
             </View>
@@ -111,7 +112,7 @@ export default function NfcAccessModal({
 
           {phase === 'error' && (
             <View style={styles.body}>
-              <Text style={[styles.bigIcon, { color: '#b42318' }]}>✕</Text>
+              <Ionicons name="close-circle" size={52} color={colors.error} />
               <Text style={styles.errorText}>Acceso denegado</Text>
               <Text style={styles.subtle}>{message}</Text>
             </View>
@@ -152,62 +153,49 @@ export default function NfcAccessModal({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: colors.overlay,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    padding: spacing['2xl'],
   },
   card: {
     width: '100%',
     maxWidth: 400,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
+    backgroundColor: colors.background,
+    borderRadius: radii.xl,
+    padding: spacing.xl,
+    ...shadow.md,
   },
-  title: {
-    fontSize: 18,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginBottom: 8,
-    color: '#111',
-  },
+  title: { ...typography.headlineMd, textAlign: 'center', marginBottom: 8 },
   body: {
     alignItems: 'center',
     paddingVertical: 24,
     minHeight: 160,
     justifyContent: 'center',
   },
-  bigIcon: { fontSize: 52, textAlign: 'center' },
-  bodyText: {
-    fontSize: 15,
-    color: '#333',
-    textAlign: 'center',
-    marginTop: 12,
-  },
-  subtle: { fontSize: 13, color: '#666', textAlign: 'center', marginTop: 8 },
+  bodyText: { ...typography.bodyLg, textAlign: 'center', marginTop: 12 },
+  subtle: { ...typography.bodyMd, textAlign: 'center', marginTop: 8 },
   successText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1a7f37',
+    ...typography.titleLg,
+    color: colors.confirmedText,
     marginTop: 6,
     letterSpacing: 1,
   },
   errorText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#b42318',
+    ...typography.titleMd,
+    color: colors.error,
     marginTop: 6,
   },
   actions: { flexDirection: 'row', gap: 8, marginTop: 8 },
   btn: {
     flex: 1,
     paddingVertical: 12,
-    borderRadius: 10,
+    borderRadius: radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  btnPrimary: { backgroundColor: '#1a73e8' },
-  btnPrimaryText: { color: '#fff', fontWeight: '600' },
-  btnSecondary: { backgroundColor: '#eef0f3' },
-  btnSecondaryText: { color: '#111', fontWeight: '600' },
+  btnPrimary: { backgroundColor: colors.primary, ...shadow.sm },
+  btnPrimaryText: { ...typography.titleSm, color: colors.onPrimary },
+  btnSecondary: { backgroundColor: colors.surfaceContainerHigh },
+  btnSecondaryText: { ...typography.titleSm },
 });

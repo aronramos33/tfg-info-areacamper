@@ -6,23 +6,26 @@ import {
   StyleSheet,
   ActivityIndicator,
   Pressable,
-  TextInput,
+  Modal,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
+import Svg, { Rect, Text as SvgText } from 'react-native-svg';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { supabase } from '../../../lib/supabase';
 import dayjs from 'dayjs';
 import isoWeek from 'dayjs/plugin/isoWeek';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
 import isSameOrBefore from 'dayjs/plugin/isSameOrBefore';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
 
 dayjs.extend(isSameOrAfter);
 dayjs.extend(isSameOrBefore);
-
 dayjs.extend(isoWeek);
 
-// ─── Types ───────────────────────────────────────────────────────────────────
 type Place = { id: number; name: string; is_active: boolean };
 
 type Reservation = {
@@ -39,19 +42,66 @@ type Reservation = {
   user_id: string;
 };
 
-// Fila cruda de extras tal como viene de BD
 type ExtraRow = {
   reservation_id: number;
   line_total_cents: number;
   extras: { code: string; name_es: string } | null;
 };
 
-// Extras ya agrupados para mostrar
 type ExtraRevenue = { code: string; name_es: string; total_cents: number };
 
 type ViewMode = 'day' | 'week' | 'month' | 'year';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+const MONTH_LABELS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+const YEAR_SPAN = 2;
+const BAR_COLOR_ACTIVE = '#1a5c2a';
+const BAR_COLOR_INACTIVE = '#a8d5b0';
+
+function RevenueBarChart({ values, labels, activeIndex, chartWidth, onBarPress }: {
+  values: number[]; labels: string[]; activeIndex: number; chartWidth: number;
+  onBarPress?: (index: number) => void;
+}) {
+  const CHART_H = 150;
+  const LABEL_H = 18;
+  const n = values.length;
+  const GAP = n <= 5 ? 8 : 3;
+  const barW = Math.max(1, (chartWidth - GAP * (n - 1)) / n);
+  const maxVal = Math.max(...values, 1);
+
+  return (
+    <Svg width={chartWidth} height={CHART_H + LABEL_H}>
+      {values.map((val, i) => {
+        const barH = Math.max(3, (val / maxVal) * CHART_H);
+        const x = i * (barW + GAP);
+        const y = CHART_H - barH;
+        const isActive = i === activeIndex;
+        return (
+          <React.Fragment key={i}>
+            <Rect x={x} y={y} width={barW} height={barH} rx={4} fill={isActive ? BAR_COLOR_ACTIVE : BAR_COLOR_INACTIVE} />
+            <SvgText
+              x={x + barW / 2}
+              y={CHART_H + LABEL_H}
+              textAnchor="middle"
+              fontSize={9}
+              fill={isActive ? '#241a08' : '#7a7a6a'}
+              fontWeight={isActive ? '700' : '400'}
+            >
+              {labels[i]}
+            </SvgText>
+            {onBarPress && (
+              <Rect
+                x={x} y={0} width={barW} height={CHART_H + LABEL_H}
+                fill="transparent"
+                onPress={() => onBarPress(i)}
+              />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </Svg>
+  );
+}
+
 function formatEuro(cents: number | null) {
   return `${((cents ?? 0) / 100).toFixed(2)} €`;
 }
@@ -60,82 +110,73 @@ function formatDate(d: string | null) {
   return dayjs(d).format('DD/MM/YYYY');
 }
 
-function overlapNightsInPeriod(
-  start: string,
-  end: string,
-  periodStart: dayjs.Dayjs,
-  periodEnd: dayjs.Dayjs,
-) {
-  // Tratamos las estancias como intervalo [start, end) (end = día de salida, NO incluye noche)
+function overlapNightsInPeriod(start: string, end: string, periodStart: dayjs.Dayjs, periodEnd: dayjs.Dayjs) {
   const rStart = dayjs(start).startOf('day');
   const rEndExclusive = dayjs(end).startOf('day');
-
-  // El periodo lo convertimos a [periodStart, periodEndExclusive)
   const pStart = periodStart.startOf('day');
   const pEndExclusive = periodEnd.startOf('day').add(1, 'day');
-
   const overlapStart = rStart.isAfter(pStart) ? rStart : pStart;
-  const overlapEnd = rEndExclusive.isBefore(pEndExclusive)
-    ? rEndExclusive
-    : pEndExclusive;
-
+  const overlapEnd = rEndExclusive.isBefore(pEndExclusive) ? rEndExclusive : pEndExclusive;
   return Math.max(0, overlapEnd.diff(overlapStart, 'day'));
 }
 const EXTRA_ORDER: Record<string, number> = { PERSON: 0, PET: 1, POWER: 2 };
-const extraIcon = (code: string) =>
-  code === 'PERSON'
-    ? '👥'
-    : code === 'PET'
-      ? '🐾'
-      : code === 'POWER'
-        ? '⚡'
-        : '•';
+function extraIcon(code: string): React.ReactNode {
+  if (code === 'PERSON') return <Ionicons name="people-outline" size={14} color={colors.onSurface} />;
+  if (code === 'PET') return <MaterialIcons name="pets" size={14} color={colors.onSurface} />;
+  if (code === 'POWER') return <Ionicons name="flash-outline" size={14} color={colors.onSurface} />;
+  return null;
+}
 
-// ─── Component ───────────────────────────────────────────────────────────────
 export default function AdminDashboard() {
   const router = useRouter();
+  const { width: screenWidth } = useWindowDimensions();
+  const chartWidth = screenWidth - spacing.lg * 4;
 
   const [loading, setLoading] = useState(true);
   const [places, setPlaces] = useState<Place[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
-  // ✅ Guardamos filas crudas de extras para recalcular por período en useMemo
   const [allExtraRows, setAllExtraRows] = useState<ExtraRow[]>([]);
 
   const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [filterDate, setFilterDate] = useState(dayjs().format('YYYY-MM-DD'));
   const [filterInput, setFilterInput] = useState(dayjs().format('DD/MM/YYYY'));
   const [filterError, setFilterError] = useState('');
-  const [filterWeek, setFilterWeek] = useState(
-    dayjs().startOf('isoWeek').format('YYYY-MM-DD'),
-  );
+  const [filterWeek, setFilterWeek] = useState(dayjs().startOf('isoWeek').format('YYYY-MM-DD'));
   const [filterMonth, setFilterMonth] = useState(dayjs().format('YYYY-MM'));
   const [filterYear, setFilterYear] = useState(dayjs().year());
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
-  // ── Load ───────────────────────────────────────────────────────────────────
+  const parsedFilterDate = useMemo(() => {
+    const [y, m, d] = filterDate.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }, [filterDate]);
+
+  const onPickerChange = (_: any, date?: Date) => {
+    setShowDatePicker(false);
+    if (date) {
+      const next = dayjs(date);
+      setFilterDate(next.format('YYYY-MM-DD'));
+      setFilterInput(next.format('DD/MM/YYYY'));
+      setFilterError('');
+    }
+  };
+
   const load = async () => {
     setLoading(true);
-    const [placesRes, reservationsRes, extrasRes] =
-      await Promise.all([
-        supabase.from('places').select('*').order('id'),
-        supabase
-          .from('reservations')
-          .select(
-            'id,place_ids,num_places,start_date,end_date,payment_status,full_name,total_amount_cents,nightly_amount_cents,created_at,user_id',
-          )
-          .eq('payment_status', 'paid'),
-        supabase
-          .from('reservation_extras')
-          .select('line_total_cents,reservation_id,extras(code,name_es)'),
-      ]);
+    const [placesRes, reservationsRes, extrasRes] = await Promise.all([
+      supabase.from('places').select('*').order('id'),
+      supabase.from('reservations')
+        .select('id,place_ids,num_places,start_date,end_date,payment_status,full_name,total_amount_cents,nightly_amount_cents,created_at,user_id')
+        .eq('payment_status', 'paid'),
+      supabase.from('reservation_extras').select('line_total_cents,reservation_id,extras(code,name_es)'),
+    ]);
 
     const allReservations = (reservationsRes.data ?? []) as Reservation[];
-
-    const rows = ((extrasRes.data ?? []) as any[])
-      .map((row) => ({
-        reservation_id: row.reservation_id as number,
-        line_total_cents: Number(row.line_total_cents ?? 0),
-        extras: row.extras as { code: string; name_es: string } | null,
-      }));
+    const rows = ((extrasRes.data ?? []) as any[]).map((row) => ({
+      reservation_id: row.reservation_id as number,
+      line_total_cents: Number(row.line_total_cents ?? 0),
+      extras: row.extras as { code: string; name_es: string } | null,
+    }));
 
     setPlaces(placesRes.data ?? []);
     setReservations(allReservations);
@@ -143,13 +184,8 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, []),
-  );
+  useFocusEffect(useCallback(() => { void load(); }, []));
 
-  // ── Período ────────────────────────────────────────────────────────────────
   const weekStart = dayjs(filterWeek);
   const weekEnd = weekStart.endOf('isoWeek');
   const monthStart = dayjs(filterMonth).startOf('month');
@@ -157,40 +193,13 @@ export default function AdminDashboard() {
   const yearStart = dayjs(`${filterYear}-01-01`).startOf('year');
   const yearEnd = dayjs(`${filterYear}-12-31`).endOf('year');
 
-  const periodStart =
-    viewMode === 'day'
-      ? dayjs(filterDate)
-      : viewMode === 'week'
-        ? weekStart
-        : viewMode === 'month'
-          ? monthStart
-          : yearStart;
-
-  const periodEnd =
-    viewMode === 'day'
-      ? dayjs(filterDate).endOf('day')
-      : viewMode === 'week'
-        ? weekEnd
-        : viewMode === 'month'
-          ? monthEnd
-          : yearEnd;
+  const periodStart = viewMode === 'day' ? dayjs(filterDate) : viewMode === 'week' ? weekStart : viewMode === 'month' ? monthStart : yearStart;
+  const periodEnd = viewMode === 'day' ? dayjs(filterDate).endOf('day') : viewMode === 'week' ? weekEnd : viewMode === 'month' ? monthEnd : yearEnd;
 
   const shift = (n: number) => {
-    if (viewMode === 'day') {
-      const next = dayjs(filterDate).add(n, 'day');
-      setFilterDate(next.format('YYYY-MM-DD'));
-      setFilterInput(next.format('DD/MM/YYYY'));
-      setFilterError('');
-    }
-    if (viewMode === 'week')
-      setFilterWeek(
-        dayjs(filterWeek)
-          .add(n, 'week')
-          .startOf('isoWeek')
-          .format('YYYY-MM-DD'),
-      );
-    if (viewMode === 'month')
-      setFilterMonth(dayjs(filterMonth).add(n, 'month').format('YYYY-MM'));
+    if (viewMode === 'day') { const next = dayjs(filterDate).add(n, 'day'); setFilterDate(next.format('YYYY-MM-DD')); setFilterInput(next.format('DD/MM/YYYY')); setFilterError(''); }
+    if (viewMode === 'week') setFilterWeek(dayjs(filterWeek).add(n, 'week').startOf('isoWeek').format('YYYY-MM-DD'));
+    if (viewMode === 'month') setFilterMonth(dayjs(filterMonth).add(n, 'month').format('YYYY-MM'));
     if (viewMode === 'year') setFilterYear((y) => y + n);
   };
 
@@ -199,14 +208,12 @@ export default function AdminDashboard() {
     setFilterError('');
     const parsed = dayjs(text, 'DD/MM/YYYY', true);
     if (parsed.isValid()) setFilterDate(parsed.format('YYYY-MM-DD'));
-    else if (text.length === 10)
-      setFilterError('Formato inválido. Usa DD/MM/YYYY');
+    else if (text.length === 10) setFilterError('Formato inválido. Usa DD/MM/YYYY');
   };
 
   const isCurrentPeriod = () => {
     if (viewMode === 'day') return filterDate === dayjs().format('YYYY-MM-DD');
-    if (viewMode === 'week')
-      return filterWeek === dayjs().startOf('isoWeek').format('YYYY-MM-DD');
+    if (viewMode === 'week') return filterWeek === dayjs().startOf('isoWeek').format('YYYY-MM-DD');
     if (viewMode === 'month') return filterMonth === dayjs().format('YYYY-MM');
     return filterYear === dayjs().year();
   };
@@ -222,13 +229,11 @@ export default function AdminDashboard() {
 
   const periodLabel = () => {
     if (viewMode === 'day') return filterInput;
-    if (viewMode === 'week')
-      return `${weekStart.format('DD/MM')} — ${weekEnd.format('DD/MM/YYYY')}`;
+    if (viewMode === 'week') return `${weekStart.format('DD/MM')} — ${weekEnd.format('DD/MM/YYYY')}`;
     if (viewMode === 'month') return dayjs(filterMonth).format('MMMM YYYY');
     return `${filterYear}`;
   };
 
-  // ── Reservas activas en el período (solapan con él) ───────────────────────
   const activeReservations = useMemo(() => {
     return reservations.filter((r) => {
       const rStart = dayjs(r.start_date);
@@ -237,76 +242,40 @@ export default function AdminDashboard() {
     });
   }, [reservations, periodStart, periodEnd]);
 
-  // ── Check-ins del período (start_date cae dentro del período) ─────────────
   const checkIns = useMemo(
-    () =>
-      reservations.filter(
-        (r) =>
-          dayjs(r.start_date).isSameOrAfter(periodStart, 'day') &&
-          dayjs(r.start_date).isSameOrBefore(periodEnd, 'day'),
-      ),
+    () => reservations.filter((r) => dayjs(r.start_date).isSameOrAfter(periodStart, 'day') && dayjs(r.start_date).isSameOrBefore(periodEnd, 'day')),
     [reservations, periodStart, periodEnd],
   );
 
-  // ── Check-outs del período (end_date cae dentro del período) ──────────────
   const checkOuts = useMemo(
-    () =>
-      reservations.filter(
-        (r) =>
-          dayjs(r.end_date).isSameOrAfter(periodStart, 'day') &&
-          dayjs(r.end_date).isSameOrBefore(periodEnd, 'day'),
-      ),
+    () => reservations.filter((r) => dayjs(r.end_date).isSameOrAfter(periodStart, 'day') && dayjs(r.end_date).isSameOrBefore(periodEnd, 'day')),
     [reservations, periodStart, periodEnd],
   );
 
-  // ── PickUp: reservas creadas HOY para fechas futuras ──────────────────────
-  // Siempre es "hoy" independientemente del período seleccionado
   const pickUpToday = useMemo(() => {
     const todayStr = dayjs().format('YYYY-MM-DD');
     return reservations.filter((r) => {
       const createdDay = dayjs(r.created_at).format('YYYY-MM-DD');
-      return (
-        createdDay === todayStr && dayjs(r.start_date).isAfter(dayjs(), 'day')
-      );
+      return createdDay === todayStr && dayjs(r.start_date).isAfter(dayjs(), 'day');
     });
   }, [reservations]);
 
-  // ── Plazas activas del período ─────────────────────────────────────────────
-  const activePlacesCount = useMemo(
-    () => activeReservations.reduce((sum, r) => sum + (r.num_places ?? 1), 0),
-    [activeReservations],
-  );
-
+  const activePlacesCount = useMemo(() => activeReservations.reduce((sum, r) => sum + (r.num_places ?? 1), 0), [activeReservations]);
   const totalPlaces = places.length;
-  // Para mantenimiento necesitaríamos maintenance_blocks, pero el dashboard
-  // es simplificado: libre = total - ocupadas (sin bloqueos)
   const freePlaces = Math.max(0, totalPlaces - activePlacesCount);
-  const maintPlaces = 0; // Sin maintenance_blocks en este componente
-  const occupancyPct =
-    totalPlaces > 0 ? Math.round((activePlacesCount / totalPlaces) * 100) : 0;
+  const maintPlaces = 0;
+  const occupancyPct = totalPlaces > 0 ? Math.round((activePlacesCount / totalPlaces) * 100) : 0;
 
-  // ── Ingresos del período ─────────────────────────────────────────────────
-  // ✅ Recalculados sobre activeReservations del período, no sobre todos
-  const activeIds = useMemo(
-    () => new Set(activeReservations.map((r) => r.id)),
-    [activeReservations],
-  );
+  const activeIds = useMemo(() => new Set(activeReservations.map((r) => r.id)), [activeReservations]);
 
   const staysRevenue = useMemo(
-    () =>
-      activeReservations.reduce((sum, r) => {
-        const n = overlapNightsInPeriod(
-          r.start_date,
-          r.end_date,
-          periodStart,
-          periodEnd,
-        );
-        return sum + (r.nightly_amount_cents ?? 0) * n * (r.num_places ?? 1);
-      }, 0),
+    () => activeReservations.reduce((sum, r) => {
+      const n = overlapNightsInPeriod(r.start_date, r.end_date, periodStart, periodEnd);
+      return sum + (r.nightly_amount_cents ?? 0) * n * (r.num_places ?? 1);
+    }, 0),
     [activeReservations, periodStart, periodEnd],
   );
 
-  // ✅ Extras filtrados solo por reservas activas en el período
   const extrasRevenueByPeriod = useMemo((): ExtraRevenue[] => {
     const map: Record<string, ExtraRevenue> = {};
     for (const row of allExtraRows) {
@@ -317,98 +286,93 @@ export default function AdminDashboard() {
       if (!map[code]) map[code] = { code, name_es: name, total_cents: 0 };
       map[code].total_cents += row.line_total_cents;
     }
-    return Object.values(map).sort(
-      (a, b) => (EXTRA_ORDER[a.code] ?? 9) - (EXTRA_ORDER[b.code] ?? 9),
-    );
+    return Object.values(map).sort((a, b) => (EXTRA_ORDER[a.code] ?? 9) - (EXTRA_ORDER[b.code] ?? 9));
   }, [allExtraRows, activeIds]);
 
-  const extrasTotal = useMemo(
-    () => extrasRevenueByPeriod.reduce((s, e) => s + e.total_cents, 0),
-    [extrasRevenueByPeriod],
-  );
+  const extrasTotal = useMemo(() => extrasRevenueByPeriod.reduce((s, e) => s + e.total_cents, 0), [extrasRevenueByPeriod]);
   const totalRevenue = staysRevenue + extrasTotal;
 
-  // ── UI ─────────────────────────────────────────────────────────────────────
+  const monthlyRevenues = useMemo((): number[] => {
+    if (viewMode !== 'month') return [];
+    const year = dayjs(filterMonth).year();
+    return MONTH_LABELS.map((_, i) => {
+      const mStart = dayjs(`${year}-${String(i + 1).padStart(2, '0')}-01`).startOf('month');
+      const mEnd = mStart.endOf('month');
+      const active = reservations.filter((r) => {
+        const rEnd = dayjs(r.end_date).endOf('day');
+        return !dayjs(r.start_date).isAfter(mEnd) && !rEnd.isBefore(mStart);
+      });
+      const activeIdSet = new Set(active.map((r) => r.id));
+      const stays = active.reduce((sum, r) => {
+        const n = overlapNightsInPeriod(r.start_date, r.end_date, mStart, mEnd);
+        return sum + (r.nightly_amount_cents ?? 0) * n * (r.num_places ?? 1);
+      }, 0);
+      const extras = allExtraRows.filter((row) => activeIdSet.has(row.reservation_id)).reduce((sum, row) => sum + row.line_total_cents, 0);
+      return stays + extras;
+    });
+  }, [viewMode, filterMonth, reservations, allExtraRows]);
+
+  const yearlyRevenues = useMemo((): { values: number[]; years: number[] } => {
+    if (viewMode !== 'year') return { values: [], years: [] };
+    const years = Array.from({ length: YEAR_SPAN * 2 + 1 }, (_, i) => filterYear - YEAR_SPAN + i);
+    const values = years.map((y) => {
+      const yStart = dayjs(`${y}-01-01`).startOf('year');
+      const yEnd = dayjs(`${y}-12-31`).endOf('year');
+      const active = reservations.filter((r) => {
+        const rEnd = dayjs(r.end_date).endOf('day');
+        return !dayjs(r.start_date).isAfter(yEnd) && !rEnd.isBefore(yStart);
+      });
+      const activeIdSet = new Set(active.map((r) => r.id));
+      const stays = active.reduce((sum, r) => {
+        const n = overlapNightsInPeriod(r.start_date, r.end_date, yStart, yEnd);
+        return sum + (r.nightly_amount_cents ?? 0) * n * (r.num_places ?? 1);
+      }, 0);
+      const extras = allExtraRows.filter((row) => activeIdSet.has(row.reservation_id)).reduce((sum, row) => sum + row.line_total_cents, 0);
+      return stays + extras;
+    });
+    return { values, years };
+  }, [viewMode, filterYear, reservations, allExtraRows]);
+
   const MAX_PREVIEW = 4;
   const showMoreActive = activeReservations.length >= MAX_PREVIEW;
-  const modeLabels: Record<ViewMode, string> = {
-    day: 'Día',
-    week: 'Semana',
-    month: 'Mes',
-    year: 'Año',
-  };
+  const modeLabels: Record<ViewMode, string> = { day: 'Día', week: 'Semana', month: 'Mes', year: 'Año' };
 
   if (loading)
     return (
       <SafeAreaView style={styles.center}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator size="large" color={colors.primary} />
       </SafeAreaView>
     );
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F7F8FB' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.pageTitle}>Dashboard</Text>
 
-        {/* ── Toggle vistas ─────────────────────────────────────────────── */}
         <View style={styles.toggleRow}>
           {(['day', 'week', 'month', 'year'] as ViewMode[]).map((m) => (
-            <Pressable
-              key={m}
-              onPress={() => setViewMode(m)}
-              style={[
-                styles.toggleBtn,
-                viewMode === m && styles.toggleBtnActive,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.toggleText,
-                  viewMode === m && styles.toggleTextActive,
-                ]}
-              >
-                {modeLabels[m]}
-              </Text>
+            <Pressable key={m} onPress={() => setViewMode(m)} style={[styles.toggleBtn, viewMode === m && styles.toggleBtnActive]}>
+              <Text style={[styles.toggleText, viewMode === m && styles.toggleTextActive]}>{modeLabels[m]}</Text>
             </Pressable>
           ))}
         </View>
 
-        {/* ── Selector período ──────────────────────────────────────────── */}
         <View style={styles.card}>
           <Text style={styles.dateLabel}>
-            {viewMode === 'day'
-              ? 'Fecha'
-              : viewMode === 'week'
-                ? 'Semana'
-                : viewMode === 'month'
-                  ? 'Mes'
-                  : 'Año'}
+            {viewMode === 'day' ? 'Fecha' : viewMode === 'week' ? 'Semana' : viewMode === 'month' ? 'Mes' : 'Año'}
           </Text>
           <View style={styles.dateRow}>
-            <Pressable onPress={() => shift(-1)} style={styles.arrowBtn}>
-              <Text style={styles.arrowText}>‹</Text>
-            </Pressable>
+            <Pressable onPress={() => shift(-1)} style={styles.arrowBtn}><Text style={styles.arrowText}>‹</Text></Pressable>
             {viewMode === 'day' ? (
-              <TextInput
-                value={filterInput}
-                onChangeText={handleFilterInput}
-                style={styles.dateInput}
-                placeholder="DD/MM/YYYY"
-                keyboardType="numeric"
-                maxLength={10}
-              />
+              <Pressable onPress={() => setShowDatePicker(true)} style={styles.periodLabelBox}>
+                <Text style={styles.periodLabelText}>{filterInput}</Text>
+              </Pressable>
             ) : (
-              <View style={styles.periodLabelBox}>
-                <Text style={styles.periodLabelText}>{periodLabel()}</Text>
-              </View>
+              <View style={styles.periodLabelBox}><Text style={styles.periodLabelText}>{periodLabel()}</Text></View>
             )}
-            <Pressable onPress={() => shift(1)} style={styles.arrowBtn}>
-              <Text style={styles.arrowText}>›</Text>
-            </Pressable>
+            <Pressable onPress={() => shift(1)} style={styles.arrowBtn}><Text style={styles.arrowText}>›</Text></Pressable>
           </View>
-          {filterError ? (
-            <Text style={styles.dateError}>{filterError}</Text>
-          ) : null}
+          {filterError ? <Text style={styles.dateError}>{filterError}</Text> : null}
           {!isCurrentPeriod() && (
             <Pressable onPress={goToCurrent} style={styles.todayBtn}>
               <Text style={styles.todayBtnText}>Volver al período actual</Text>
@@ -416,92 +380,153 @@ export default function AdminDashboard() {
           )}
         </View>
 
-        {/* ── KPIs 1-4: Plazas ─────────────────────────────────────────── */}
+        {showDatePicker && Platform.OS === 'ios' && (
+          <Modal transparent animationType="slide" onRequestClose={() => setShowDatePicker(false)}>
+            <Pressable style={styles.pickerBackdrop} onPress={() => setShowDatePicker(false)}>
+              <View style={styles.pickerCard} onStartShouldSetResponder={() => true}>
+                <View style={styles.pickerHandle} />
+                <DateTimePicker
+                  value={parsedFilterDate}
+                  mode="date"
+                  display="inline"
+                  onChange={onPickerChange}
+                  locale="es-ES"
+                  accentColor={colors.primary}
+                  themeVariant="light"
+                />
+              </View>
+            </Pressable>
+          </Modal>
+        )}
+        {showDatePicker && Platform.OS === 'android' && (
+          <DateTimePicker
+            value={parsedFilterDate}
+            mode="date"
+            display="default"
+            onChange={onPickerChange}
+            accentColor={colors.primary}
+          />
+        )}
+
         <View style={styles.sectionLabel}>
           <Text style={styles.sectionTitle}>Plazas</Text>
         </View>
         <View style={styles.kpiGrid}>
-          <View style={[styles.kpiCard, { borderLeftColor: '#f44336' }]}>
+          <View style={[styles.kpiCard, { borderLeftColor: '#c0392b' }]}>
             <Text style={styles.kpiValue}>{activePlacesCount}</Text>
             <Text style={styles.kpiLabel}>Ocupadas</Text>
           </View>
-          <View style={[styles.kpiCard, { borderLeftColor: '#4CAF50' }]}>
+          <View style={[styles.kpiCard, { borderLeftColor: colors.confirmedText }]}>
             <Text style={styles.kpiValue}>{freePlaces}</Text>
             <Text style={styles.kpiLabel}>Libres</Text>
           </View>
-          <View style={[styles.kpiCard, { borderLeftColor: '#FF9800' }]}>
+          <View style={[styles.kpiCard, { borderLeftColor: colors.warning }]}>
             <Text style={styles.kpiValue}>{maintPlaces}</Text>
             <Text style={styles.kpiLabel}>Mantenimiento</Text>
           </View>
-          <View style={[styles.kpiCard, { borderLeftColor: '#9C27B0' }]}>
+          <View style={[styles.kpiCard, { borderLeftColor: colors.secondary }]}>
             <Text style={styles.kpiValue}>{occupancyPct}%</Text>
             <Text style={styles.kpiLabel}>Ocupación</Text>
           </View>
         </View>
 
-        {/* ── KPI 5: Ingresos desglosados ──────────────────────────────── */}
         <View style={styles.sectionLabel}>
           <Text style={styles.sectionTitle}>Ingresos del período</Text>
         </View>
         <View style={styles.card}>
           <Text style={styles.revenueTotal}>{formatEuro(totalRevenue)}</Text>
           <View style={styles.revenueDivider} />
-
-          {/* Estancias */}
-          <View style={styles.revenueRow}>
-            <Text style={styles.revenueLabel}>🏕️ Estancias</Text>
-            <Text style={styles.revenueValue}>{formatEuro(staysRevenue)}</Text>
-          </View>
-
-          {/* Cada extra */}
-          {extrasRevenueByPeriod.map((e) => (
-            <View key={e.code} style={styles.revenueRow}>
-              <Text style={styles.revenueLabel}>
-                {extraIcon(e.code)} {e.name_es}
-              </Text>
-              <Text style={styles.revenueValue}>
-                {formatEuro(e.total_cents)}
-              </Text>
-            </View>
-          ))}
-
-          {/* Total extras si hay más de uno */}
-          {extrasRevenueByPeriod.length > 0 && (
-            <View style={[styles.revenueRow, styles.revenueTotalRow]}>
-              <Text style={styles.revenueTotalLabel}>Total extras</Text>
-              <Text style={styles.revenueTotalValue}>
-                {formatEuro(extrasTotal)}
-              </Text>
-            </View>
+          {(viewMode === 'day' || viewMode === 'week') ? (
+            <>
+              <View style={styles.revenueRow}>
+                <View style={styles.revenueLabelCell}>
+                  <Ionicons name="leaf-outline" size={14} color={colors.onSurface} />
+                  <Text style={styles.revenueLabel}>Estancias</Text>
+                </View>
+                <Text style={styles.revenueValue}>{formatEuro(staysRevenue)}</Text>
+              </View>
+              {extrasRevenueByPeriod.map((e) => (
+                <View key={e.code} style={styles.revenueRow}>
+                  <View style={styles.revenueLabelCell}>
+                    {extraIcon(e.code)}
+                    <Text style={styles.revenueLabel}>{e.name_es}</Text>
+                  </View>
+                  <Text style={styles.revenueValue}>{formatEuro(e.total_cents)}</Text>
+                </View>
+              ))}
+              {extrasRevenueByPeriod.length > 0 && (
+                <View style={[styles.revenueRow, styles.revenueTotalRow]}>
+                  <Text style={styles.revenueTotalLabel}>Total extras</Text>
+                  <Text style={styles.revenueTotalValue}>{formatEuro(extrasTotal)}</Text>
+                </View>
+              )}
+            </>
+          ) : (
+            <>
+              {viewMode === 'month' ? (
+                <RevenueBarChart
+                  values={monthlyRevenues}
+                  labels={MONTH_LABELS}
+                  activeIndex={dayjs(filterMonth).month()}
+                  chartWidth={chartWidth}
+                  onBarPress={(i) => setFilterMonth(`${dayjs(filterMonth).year()}-${String(i + 1).padStart(2, '0')}`)}
+                />
+              ) : (
+                <RevenueBarChart
+                  values={yearlyRevenues.values}
+                  labels={yearlyRevenues.years.map(String)}
+                  activeIndex={YEAR_SPAN}
+                  chartWidth={chartWidth}
+                  onBarPress={(i) => setFilterYear(filterYear - YEAR_SPAN + i)}
+                />
+              )}
+              <View style={styles.revenueDivider} />
+              <View style={styles.revenueRow}>
+                <View style={styles.revenueLabelCell}>
+                  <Ionicons name="leaf-outline" size={14} color={colors.onSurface} />
+                  <Text style={styles.revenueLabel}>Estancias</Text>
+                </View>
+                <Text style={styles.revenueValue}>{formatEuro(staysRevenue)}</Text>
+              </View>
+              {extrasRevenueByPeriod.map((e) => (
+                <View key={e.code} style={styles.revenueRow}>
+                  <View style={styles.revenueLabelCell}>
+                    {extraIcon(e.code)}
+                    <Text style={styles.revenueLabel}>{e.name_es}</Text>
+                  </View>
+                  <Text style={styles.revenueValue}>{formatEuro(e.total_cents)}</Text>
+                </View>
+              ))}
+              {extrasRevenueByPeriod.length > 0 && (
+                <View style={[styles.revenueRow, styles.revenueTotalRow]}>
+                  <Text style={styles.revenueTotalLabel}>Total extras</Text>
+                  <Text style={styles.revenueTotalValue}>{formatEuro(extrasTotal)}</Text>
+                </View>
+              )}
+            </>
           )}
         </View>
 
-        {/* ── KPIs 6-7: Entradas y Salidas ─────────────────────────────── */}
         <View style={styles.sectionLabel}>
           <Text style={styles.sectionTitle}>Movimientos del período</Text>
         </View>
         <View style={styles.rowCards}>
           <View style={[styles.card, { flex: 1 }]}>
-            <Text style={styles.cardTitle}>📥 Entradas</Text>
+            <Text style={styles.cardTitle}>Entradas</Text>
             <Text style={styles.bigNumber}>{checkIns.length}</Text>
           </View>
           <View style={[styles.card, { flex: 1 }]}>
-            <Text style={styles.cardTitle}>📤 Salidas</Text>
+            <Text style={styles.cardTitle}>Salidas</Text>
             <Text style={styles.bigNumber}>{checkOuts.length}</Text>
           </View>
         </View>
 
-        {/* ── KPI 8: PickUp diario ─────────────────────────────────────── */}
         {viewMode === 'day' && (
           <>
-            {/* ── KPI 8: PickUp diario ─────────────────────────────────────── */}
             <View style={styles.sectionLabel}>
               <Text style={styles.sectionTitle}>PickUp de hoy</Text>
-              <Text style={styles.sectionSubtitle}>
-                Reservas hechas hoy para fechas futuras
-              </Text>
+              <Text style={styles.sectionSubtitle}>Reservas hechas hoy para fechas futuras</Text>
             </View>
-
             <View style={styles.card}>
               {pickUpToday.length === 0 ? (
                 <View style={styles.pickUpEmpty}>
@@ -512,43 +537,16 @@ export default function AdminDashboard() {
                 <>
                   <View style={styles.pickUpHeader}>
                     <Text style={styles.bigNumber}>{pickUpToday.length}</Text>
-                    <Text style={styles.pickUpSub}>
-                      reserva{pickUpToday.length !== 1 ? 's' : ''} nueva
-                      {pickUpToday.length !== 1 ? 's' : ''}
-                    </Text>
+                    <Text style={styles.pickUpSub}>reserva{pickUpToday.length !== 1 ? 's' : ''} nueva{pickUpToday.length !== 1 ? 's' : ''}</Text>
                   </View>
-
                   {pickUpToday.map((r) => (
-                    <Pressable
-                      key={r.id}
-                      onPress={() => router.push(`/admin/places/${r.id}`)}
-                      style={({ pressed }) => [
-                        styles.reservationRow,
-                        pressed && { backgroundColor: '#F7F8FB' },
-                      ]}
-                    >
+                    <Pressable key={r.id} onPress={() => router.push(`/admin/places/${r.id}`)} style={({ pressed }) => [styles.reservationRow, pressed && { backgroundColor: colors.surfaceContainerHigh }]}>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.reservationName}>
-                          {r.full_name ?? 'Sin nombre'} — #{r.id}
-                          {(r.num_places ?? 1) > 1
-                            ? ` (${r.num_places} plazas)`
-                            : ''}
-                        </Text>
-                        <Text style={styles.reservationDates}>
-                          Entrada: {formatDate(r.start_date)}
-                        </Text>
+                        <Text style={styles.reservationName}>{r.full_name ?? 'Sin nombre'} — #{r.id}{(r.num_places ?? 1) > 1 ? ` (${r.num_places} plazas)` : ''}</Text>
+                        <Text style={styles.reservationDates}>Entrada: {formatDate(r.start_date)}</Text>
                       </View>
-
-                      <View
-                        style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          gap: 6,
-                        }}
-                      >
-                        <Text style={styles.reservationAmount}>
-                          {formatEuro(r.total_amount_cents)}
-                        </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.reservationAmount}>{formatEuro(r.total_amount_cents)}</Text>
                         <Text style={styles.chevron}>›</Text>
                       </View>
                     </Pressable>
@@ -559,62 +557,33 @@ export default function AdminDashboard() {
           </>
         )}
 
-        {/* ── KPI 9: Reservas activas del período ──────────────────────── */}
         <View style={styles.sectionLabel}>
           <Text style={styles.sectionTitle}>Reservas activas</Text>
         </View>
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <Text style={styles.cardTitle}>
-              {activeReservations.length} reserva
-              {activeReservations.length !== 1 ? 's' : ''}
-              {activePlacesCount !== activeReservations.length
-                ? ` · ${activePlacesCount} plazas`
-                : ''}
+              {activeReservations.length} reserva{activeReservations.length !== 1 ? 's' : ''}
+              {activePlacesCount !== activeReservations.length ? ` · ${activePlacesCount} plazas` : ''}
             </Text>
             {showMoreActive && (
-              <Pressable
-                onPress={() =>
-                  router.push({
-                    pathname: '/admin/places/reservas',
-                    params: { filter: 'paid' },
-                  })
-                }
-              >
+              <Pressable onPress={() => router.push({ pathname: '/admin/places/reservas', params: { filter: 'paid' } })}>
                 <Text style={styles.verTodas}>Ver todas →</Text>
               </Pressable>
             )}
           </View>
 
           {activeReservations.length === 0 ? (
-            <Text style={styles.emptyText}>
-              No hay reservas activas en este período.
-            </Text>
+            <Text style={styles.emptyText}>No hay reservas activas en este período.</Text>
           ) : (
             activeReservations.slice(0, MAX_PREVIEW).map((r) => (
-              <Pressable
-                key={r.id}
-                onPress={() => router.push(`/admin/places/${r.id}`)}
-                style={({ pressed }) => [
-                  styles.reservationRow,
-                  pressed && { backgroundColor: '#F7F8FB' },
-                ]}
-              >
+              <Pressable key={r.id} onPress={() => router.push(`/admin/places/${r.id}`)} style={({ pressed }) => [styles.reservationRow, pressed && { backgroundColor: colors.surfaceContainerHigh }]}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.reservationName}>
-                    {r.full_name ?? 'Sin nombre'} — #{r.id}
-                    {(r.num_places ?? 1) > 1 ? ` (${r.num_places} plazas)` : ''}
-                  </Text>
-                  <Text style={styles.reservationDates}>
-                    {formatDate(r.start_date)} → {formatDate(r.end_date)}
-                  </Text>
+                  <Text style={styles.reservationName}>{r.full_name ?? 'Sin nombre'} — #{r.id}{(r.num_places ?? 1) > 1 ? ` (${r.num_places} plazas)` : ''}</Text>
+                  <Text style={styles.reservationDates}>{formatDate(r.start_date)} → {formatDate(r.end_date)}</Text>
                 </View>
-                <View
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
-                >
-                  <Text style={styles.reservationAmount}>
-                    {formatEuro(r.total_amount_cents)}
-                  </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.reservationAmount}>{formatEuro(r.total_amount_cents)}</Text>
                   <Text style={styles.chevron}>›</Text>
                 </View>
               </Pressable>
@@ -622,18 +591,8 @@ export default function AdminDashboard() {
           )}
 
           {showMoreActive && (
-            <Pressable
-              onPress={() =>
-                router.push({
-                  pathname: '/admin/places/reservas',
-                  params: { filter: 'paid' },
-                })
-              }
-              style={styles.verMasBtn}
-            >
-              <Text style={styles.verMasText}>
-                Ver todas ({activeReservations.length}) →
-              </Text>
+            <Pressable onPress={() => router.push({ pathname: '/admin/places/reservas', params: { filter: 'paid' } })} style={styles.verMasBtn}>
+              <Text style={styles.verMasText}>Ver todas ({activeReservations.length}) →</Text>
             </Pressable>
           )}
         </View>
@@ -642,202 +601,112 @@ export default function AdminDashboard() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  container: { padding: 16, paddingBottom: 48 },
-  pageTitle: { fontSize: 26, fontWeight: '800', marginBottom: 16 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background },
+  container: { padding: spacing.lg, paddingBottom: 48 },
+  pageTitle: { ...typography.headlineLg, marginBottom: 16 },
 
   sectionLabel: { marginBottom: 8, marginTop: 4 },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#555',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  sectionSubtitle: { fontSize: 12, color: '#999', marginTop: 2 },
+  sectionTitle: { ...typography.labelSm },
+  sectionSubtitle: { ...typography.labelMd, marginTop: 2, fontFamily: 'Inter_400Regular' },
 
   toggleRow: {
     flexDirection: 'row',
-    backgroundColor: '#e8eaf0',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceContainerHigh,
+    borderRadius: radii.md,
     padding: 4,
     marginBottom: 14,
   },
-  toggleBtn: {
-    flex: 1,
-    paddingVertical: 9,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  toggleBtnActive: {
-    backgroundColor: 'white',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
-  },
-  toggleText: { fontSize: 13, fontWeight: '600', color: '#888' },
-  toggleTextActive: { color: '#007AFF' },
+  toggleBtn: { flex: 1, paddingVertical: 9, borderRadius: radii.sm, alignItems: 'center' },
+  toggleBtnActive: { backgroundColor: colors.surfaceContainerLow, ...shadow.sm },
+  toggleText: { ...typography.titleSm, color: colors.onSurfaceVariant },
+  toggleTextActive: { color: colors.secondary },
 
   card: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 16,
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
     marginBottom: 14,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
+    ...shadow.sm,
   },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  cardTitle: { fontSize: 15, fontWeight: '700', color: '#333' },
-  emptyText: { fontSize: 14, color: '#aaa', marginTop: 4 },
-  verTodas: { color: '#007AFF', fontWeight: '700', fontSize: 13 },
+  cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  cardTitle: { ...typography.titleMd },
+  emptyText: { ...typography.bodyMd, marginTop: 4 },
+  verTodas: { ...typography.titleSm, color: colors.secondary },
 
-  dateLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#666',
-    marginBottom: 10,
-  },
+  dateLabel: { ...typography.labelMd, marginBottom: 10 },
   dateRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  arrowBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: '#EEF4FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  arrowText: { fontSize: 22, color: '#007AFF', fontWeight: '700' },
+  arrowBtn: { width: 40, height: 40, borderRadius: radii.sm, backgroundColor: colors.surfaceContainerHigh, alignItems: 'center', justifyContent: 'center' },
+  arrowText: { fontSize: 22, color: colors.secondary, fontFamily: 'PlusJakartaSans_700Bold' },
   dateInput: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 17,
-    fontWeight: '700',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
+    flex: 1, textAlign: 'center', ...typography.titleMd,
+    borderWidth: 1, borderColor: colors.outline,
+    borderRadius: radii.sm,
     paddingVertical: Platform.select({ ios: 10, android: 8 }),
-    backgroundColor: '#F7F8FB',
+    backgroundColor: colors.inputSurface,
+    color: colors.onSurface,
   },
   periodLabelBox: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: colors.outline,
+    borderRadius: radii.sm,
     paddingVertical: Platform.select({ ios: 10, android: 8 }),
-    backgroundColor: '#F7F8FB',
+    backgroundColor: colors.inputSurface,
   },
-  periodLabelText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#111',
-    textTransform: 'capitalize',
-  },
-  dateError: { color: 'red', fontSize: 12, marginTop: 6 },
-  todayBtn: {
-    marginTop: 10,
-    alignSelf: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    backgroundColor: '#EEF4FF',
-    borderRadius: 999,
-  },
-  todayBtnText: { color: '#007AFF', fontWeight: '700', fontSize: 13 },
+  periodLabelText: { ...typography.titleMd, textTransform: 'capitalize' },
+  dateError: { ...typography.labelMd, color: colors.error, marginTop: 6 },
+  todayBtn: { marginTop: 10, alignSelf: 'center', paddingHorizontal: 16, paddingVertical: 6, backgroundColor: colors.surfaceContainerHigh, borderRadius: radii.full },
+  todayBtnText: { ...typography.titleSm, color: colors.secondary },
 
-  // KPIs plazas
-  kpiGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 14,
+  pickerBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: 'flex-end' },
+  pickerCard: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: radii.xl,
+    borderTopRightRadius: radii.xl,
+    paddingBottom: 34,
+    paddingTop: 8,
   },
+  pickerHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.outline, alignSelf: 'center', marginBottom: 8 },
+
+  kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
   kpiCard: {
-    flex: 1,
-    minWidth: '45%',
-    backgroundColor: 'white',
-    borderRadius: 14,
+    flex: 1, minWidth: '45%',
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.md,
     padding: 14,
     borderLeftWidth: 4,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
+    ...shadow.sm,
   },
-  kpiValue: { fontSize: 28, fontWeight: '800', color: '#111' },
-  kpiLabel: { fontSize: 12, color: '#666', marginTop: 2 },
+  kpiValue: { ...typography.display, fontSize: 28 },
+  kpiLabel: { ...typography.bodyMd, marginTop: 2 },
 
-  // Ingresos
-  revenueTotal: {
-    fontSize: 30,
-    fontWeight: '800',
-    color: '#4CAF50',
-    marginBottom: 4,
-  },
-  revenueDivider: { height: 1, backgroundColor: '#f0f0f0', marginVertical: 10 },
-  revenueRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 5,
-  },
-  revenueLabel: { fontSize: 14, color: '#444' },
-  revenueValue: { fontSize: 14, fontWeight: '700', color: '#111' },
-  revenueTotalRow: {
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    marginTop: 4,
-    paddingTop: 10,
-  },
-  revenueTotalLabel: { fontSize: 14, fontWeight: '800', color: '#111' },
-  revenueTotalValue: { fontSize: 14, fontWeight: '800', color: '#111' },
+  revenueTotal: { fontFamily: 'PlusJakartaSans_800ExtraBold', fontSize: 30, color: colors.confirmedText, marginBottom: 4 },
+  revenueDivider: { height: 1, backgroundColor: colors.outlineVariant, marginVertical: 10 },
+  revenueRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 },
+  revenueLabelCell: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6 },
+  revenueLabel: { ...typography.bodyMd, color: colors.onSurface },
+  revenueValue: { ...typography.titleSm, color: colors.onSurface },
+  revenueTotalRow: { borderTopWidth: 1, borderTopColor: colors.outlineVariant, marginTop: 4, paddingTop: 10 },
+  revenueTotalLabel: { ...typography.titleSm },
+  revenueTotalValue: { ...typography.titleSm },
 
-  // Entradas / Salidas
   rowCards: { flexDirection: 'row', gap: 12, marginBottom: 14 },
-  bigNumber: { fontSize: 36, fontWeight: '800', color: '#111', marginTop: 4 },
+  bigNumber: { ...typography.display, fontSize: 36, marginTop: 4 },
 
-  // PickUp
   pickUpEmpty: { alignItems: 'center', paddingVertical: 8 },
-  pickUpHeader: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 8,
-    marginBottom: 8,
-  },
-  pickUpSub: { fontSize: 15, color: '#666', fontWeight: '500' },
+  pickUpHeader: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 8 },
+  pickUpSub: { ...typography.bodyLg, color: colors.onSurfaceVariant },
 
-  // Lista reservas
   reservationRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
+    borderTopWidth: 1, borderTopColor: colors.outlineVariant,
     paddingHorizontal: 4,
   },
-  reservationName: { fontSize: 14, fontWeight: '700', color: '#111' },
-  reservationDates: { fontSize: 13, color: '#666', marginTop: 2 },
-  reservationAmount: { fontSize: 14, fontWeight: '800', color: '#333' },
-  chevron: { fontSize: 20, color: '#ccc', fontWeight: '700' },
-  verMasBtn: {
-    marginTop: 12,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    alignItems: 'center',
-  },
-  verMasText: { color: '#007AFF', fontWeight: '700', fontSize: 14 },
+  reservationName: { ...typography.titleSm },
+  reservationDates: { ...typography.bodyMd, marginTop: 2 },
+  reservationAmount: { ...typography.titleSm, color: colors.onSurface },
+  chevron: { fontSize: 20, color: colors.onSurfaceVariant, fontFamily: 'PlusJakartaSans_700Bold' },
+  verMasBtn: { marginTop: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.outlineVariant, alignItems: 'center' },
+  verMasText: { ...typography.titleSm, color: colors.secondary },
 });

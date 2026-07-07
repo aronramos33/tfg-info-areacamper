@@ -1,152 +1,212 @@
-import { useEffect, useMemo, useState } from 'react';
-import { View, Text, Pressable } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  Pressable,
+  ActivityIndicator,
+  StyleSheet,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import dayjs from 'dayjs';
-import CalendarRangePaged from '@/components/CalendarRangePaged';
-import { nightsBetween } from '@/components/utils/dates';
-import { formatCents, NIGHTLY_CENTS } from '@/components/utils/money';
-import { useAuth } from '@/providers/AuthProvider';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/providers/AuthProvider';
+import {
+  usePendingReservation,
+  emptyPlaceConfig,
+} from '@/providers/PendingReservationContext';
+import { NIGHTLY_CENTS } from '@/components/utils/money';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
+import StepProgress from '@/components/StepProgress';
 
-const MONTHS_WINDOW = 12;
-
-type ActiveReservation = {
-  start_date: string;
-  end_date: string;
-  num_places: number;
-  user_id: string;
-};
-
-function computeDisabledDates(
-  allReservations: ActiveReservation[],
-  totalPlaces: number,
-  userId: string | undefined,
-  todayStr: string,
-  windowEndStr: string,
-): string[] {
-  const disabled = new Set<string>();
-  let cur = dayjs(todayStr);
-  const windowEnd = dayjs(windowEndStr);
-
-  while (!cur.isAfter(windowEnd)) {
-    const d = cur.format('YYYY-MM-DD');
-    let occupiedCount = 0;
-    let userHasReservation = false;
-
-    for (const r of allReservations) {
-      if (r.start_date <= d && r.end_date > d) {
-        occupiedCount += r.num_places;
-        if (userId && r.user_id === userId) userHasReservation = true;
-      }
-    }
-
-    if (userHasReservation || occupiedCount >= totalPlaces) {
-      disabled.add(d);
-    }
-    cur = cur.add(1, 'day');
-  }
-
-  return [...disabled];
-}
-
-export default function SearchScreen() {
+export default function ReservationsScreen() {
   const router = useRouter();
   const { session } = useAuth();
-  const [startId, setStartId] = useState<string | undefined>();
-  const [endId, setEndId] = useState<string | undefined>();
-  const [disabledDates, setDisabledDates] = useState<string[]>([]);
+  const { setPending } = usePendingReservation();
 
-  const nights = useMemo(() => nightsBetween(startId, endId), [startId, endId]);
-  const totalCents = useMemo(() => nights * NIGHTLY_CENTS, [nights]);
-  const canContinue = Boolean(startId && endId && nights > 0);
+  const [maxPlaces, setMaxPlaces] = useState(28);
+  const [numPlaces, setNumPlaces] = useState(1);
+  const [nightlyCents, setNightlyCents] = useState(NIGHTLY_CENTS);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const todayStr = dayjs().startOf('day').format('YYYY-MM-DD');
-    const windowEndStr = dayjs()
-      .startOf('day')
-      .add(MONTHS_WINDOW - 1, 'month')
-      .endOf('month')
-      .format('YYYY-MM-DD');
-
-    async function loadDisabledDates() {
-      const [placesRes, reservationsRes] = await Promise.all([
+    async function load() {
+      const [placesRes, pricingRes] = await Promise.all([
         supabase
           .from('places')
           .select('id', { count: 'exact', head: true })
           .eq('is_active', true),
         supabase
-          .from('reservations')
-          .select('start_date, end_date, num_places, user_id')
-          .neq('status', 'cancelled')
-          .eq('payment_status', 'paid')
-          .lt('start_date', windowEndStr)
-          .gt('end_date', todayStr),
+          .from('pricing')
+          .select('nightly_amount_cents')
+          .eq('active', true)
+          .single(),
       ]);
-
-      const totalPlaces = placesRes.count ?? 0;
-      const allReservations = (reservationsRes.data ?? []) as ActiveReservation[];
-
-      setDisabledDates(
-        computeDisabledDates(
-          allReservations,
-          totalPlaces,
-          session?.user.id,
-          todayStr,
-          windowEndStr,
-        ),
-      );
+      if (placesRes.count) setMaxPlaces(placesRes.count);
+      if (pricingRes.data)
+        setNightlyCents(pricingRes.data.nightly_amount_cents);
+      setLoading(false);
     }
+    load();
+  }, []);
 
-    loadDisabledDates();
-  }, [session?.user.id]);
+  const handleContinue = () => {
+    if (!session) {
+      router.push('/(auth)/sign-in');
+      return;
+    }
+    setPending((prev) => ({
+      ...prev,
+      numPlaces,
+      nightlyCents,
+      placeConfigs: Array.from(
+        { length: numPlaces },
+        (_, i) => prev.placeConfigs[i] ?? emptyPlaceConfig(),
+      ),
+    }));
+    router.push('/(main)/reservations/configure-places');
+  };
 
   return (
-    <View style={{ flex: 1 }}>
-      <View style={{ paddingHorizontal: 16, paddingTop: 40 }}>
-        <Text style={{ fontSize: 20, fontWeight: '600' }}>
-          Elige tus fechas
+    <SafeAreaView style={styles.safe}>
+      <StepProgress current={1} />
+      <View style={styles.body}>
+        <Text style={styles.title}>¿Cuántas plazas necesitas?</Text>
+        <Text style={styles.subtitle}>
+          Cada plaza está pensada para una autocaravana o caravana.
+        </Text>
+
+        {loading ? (
+          <ActivityIndicator
+            size="large"
+            color={colors.primary}
+            style={{ marginBottom: 48 }}
+          />
+        ) : (
+          <View style={styles.stepper}>
+            <Pressable
+              onPress={() => setNumPlaces((n) => Math.max(1, n - 1))}
+              disabled={numPlaces <= 1}
+              style={({ pressed }) => [
+                styles.stepBtn,
+                numPlaces <= 1 && styles.stepBtnDisabled,
+                { opacity: pressed ? 0.7 : 1 },
+              ]}
+            >
+              <Ionicons
+                name="remove"
+                size={28}
+                color={
+                  numPlaces <= 1 ? colors.onSurfaceVariant : colors.onPrimary
+                }
+              />
+            </Pressable>
+
+            <Text style={styles.counter}>{numPlaces}</Text>
+
+            <Pressable
+              onPress={() => setNumPlaces((n) => Math.min(maxPlaces, n + 1))}
+              disabled={numPlaces >= maxPlaces}
+              style={({ pressed }) => [
+                styles.stepBtn,
+                numPlaces >= maxPlaces && styles.stepBtnDisabled,
+                { opacity: pressed ? 0.7 : 1 },
+              ]}
+            >
+              <Ionicons
+                name="add"
+                size={28}
+                color={
+                  numPlaces >= maxPlaces
+                    ? colors.onSurfaceVariant
+                    : colors.onPrimary
+                }
+              />
+            </Pressable>
+          </View>
+        )}
+
+        <Text style={styles.maxLabel}>
+          {loading
+            ? 'Cargando disponibilidad…'
+            : `Máximo disponible: ${maxPlaces} plaza${maxPlaces !== 1 ? 's' : ''}`}
         </Text>
       </View>
 
-      <View style={{ flex: 1, paddingHorizontal: 16, paddingTop: 16 }}>
-        <CalendarRangePaged
-          monthsWindow={MONTHS_WINDOW}
-          disabledDates={disabledDates}
-          onChange={({ startId, endId }) => {
-            setStartId(startId);
-            setEndId(endId);
-          }}
-        />
-      </View>
-
-      <View style={{ padding: 16, gap: 8 }}>
-        <Text>Noches: {nights}</Text>
-        <Text>Total estimado: {formatCents(totalCents)}</Text>
-
+      <View style={styles.footer}>
         <Pressable
-          onPress={() => {
-            if (!session) {
-              router.push('/(auth)/sign-in');
-              return;
-            }
-            router.push({
-              pathname: '/(screens)/checkout',
-              params: { startDate: startId!, endDate: endId! },
-            });
-          }}
-          disabled={!canContinue}
-          style={({ pressed }) => ({
-            opacity: !canContinue ? 0.4 : pressed ? 0.7 : 1,
-            backgroundColor: '#000',
-            paddingVertical: 14,
-            borderRadius: 8,
-            alignItems: 'center',
-            marginTop: 8,
-          })}
+          onPress={handleContinue}
+          disabled={loading}
+          style={({ pressed }) => [
+            styles.continueBtn,
+            { opacity: pressed || loading ? 0.75 : 1 },
+          ]}
         >
-          <Text style={{ color: '#fff', fontWeight: '700' }}>CONTINUAR</Text>
+          <Text style={styles.continueBtnText}>
+            Continuar con {numPlaces} plaza{numPlaces !== 1 ? 's' : ''}
+          </Text>
         </Pressable>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.background },
+  body: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: spacing['2xl'],
+  },
+  title: {
+    ...typography.headlineMd,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  subtitle: {
+    ...typography.bodyMd,
+    marginBottom: 48,
+    textAlign: 'center',
+  },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 36,
+    marginBottom: 24,
+  },
+  stepBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: radii.full,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.sm,
+  },
+  stepBtnDisabled: {
+    backgroundColor: colors.surfaceContainerHighest,
+  },
+  counter: {
+    ...typography.display,
+    fontSize: 72,
+    minWidth: 90,
+    textAlign: 'center',
+  },
+  maxLabel: {
+    ...typography.labelMd,
+    textAlign: 'center',
+  },
+  footer: { padding: spacing.xl },
+  continueBtn: {
+    backgroundColor: colors.primary,
+    paddingVertical: 16,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    ...shadow.sm,
+  },
+  continueBtnText: {
+    ...typography.titleMd,
+    color: colors.onPrimary,
+  },
+});

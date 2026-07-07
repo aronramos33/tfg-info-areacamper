@@ -1,21 +1,30 @@
-// components/RequireAuthCard.tsx
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Link } from 'expo-router';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
 
 export default function RequireAuthCard() {
+  const router = useRouter();
+
   return (
     <View style={styles.container}>
       <View style={styles.card}>
+        <View style={styles.iconWrapper}>
+          <Ionicons name="lock-closed" size={32} color={colors.primary} />
+        </View>
         <Text style={styles.title}>Necesitas iniciar sesión</Text>
         <Text style={styles.subtitle}>
           Inicia sesión o regístrate para acceder a esta sección.
         </Text>
-
-        <Link href="/(auth)/sign-in" asChild>
-          <TouchableOpacity style={styles.button}>
-            <Text style={styles.buttonText}>Iniciar sesión</Text>
-          </TouchableOpacity>
-        </Link>
+        <Pressable
+          onPress={() => router.push('/(auth)/sign-in')}
+          style={({ pressed }) => [
+            styles.button,
+            { opacity: pressed ? 0.8 : 1 },
+          ]}
+        >
+          <Text style={styles.buttonText}>Iniciar sesión</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -26,40 +35,46 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing.xl,
+    backgroundColor: colors.background,
   },
   card: {
     width: '100%',
-    padding: 20,
-    borderRadius: 12,
-    backgroundColor: 'white',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
+    padding: spacing['2xl'],
+    borderRadius: radii.xl,
+    backgroundColor: colors.surfaceContainerLow,
+    alignItems: 'center',
+    ...shadow.md,
+  },
+  iconWrapper: {
+    width: 64,
+    height: 64,
+    borderRadius: radii.full,
+    backgroundColor: colors.primaryContainer + '22',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.lg,
   },
   title: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    marginBottom: 12,
+    ...typography.headlineMd,
+    marginBottom: spacing.sm,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 16,
+    ...typography.bodyMd,
     textAlign: 'center',
-    marginBottom: 20,
-    color: '#555',
+    marginBottom: spacing.xl,
   },
   button: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 12,
-    borderRadius: 8,
+    width: '100%',
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    ...shadow.sm,
   },
   buttonText: {
-    textAlign: 'center',
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
+    ...typography.titleMd,
+    color: colors.onPrimary,
   },
 });

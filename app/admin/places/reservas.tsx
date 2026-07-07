@@ -13,6 +13,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 
 import { supabase } from '../../../lib/supabase';
 import dayjs from 'dayjs';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
 
 type Reservation = {
   id: number;
@@ -24,6 +25,7 @@ type Reservation = {
   total_amount_cents: number | null;
   refund_amount_cents: number | null;
   cancelled_at: string | null;
+  modified_at: string | null;
   user_id: string;
 };
 
@@ -35,18 +37,29 @@ function formatDate(d: string) {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  paid: '✅ Pagada',
-  refunded: '↩️ Reembolsada',
-  cancelled: '❌ Cancelada',
+  paid: 'Pagada',
+  modified: 'Modificada',
+  refunded: 'Reembolsada',
+  cancelled: 'Cancelada',
 };
 const STATUS_COLORS: Record<string, string> = {
-  paid: '#e8f5e9',
+  paid: colors.confirmedBg,
+  modified: colors.modifiedBg,
   refunded: '#e3f2fd',
-  cancelled: '#fdecea',
+  cancelled: colors.cancelledBg,
+};
+const STATUS_TEXT_COLORS: Record<string, string> = {
+  paid: colors.confirmedText,
+  modified: colors.modifiedText,
+  refunded: '#2c3e82',
+  cancelled: colors.cancelledText,
 };
 
 function reservationDisplayStatus(r: Reservation): string {
-  if (r.status === 'cancelled') return 'cancelled';
+  if (r.status === 'cancelled') {
+    return (r.refund_amount_cents ?? 0) > 0 ? 'refunded' : 'cancelled';
+  }
+  if (r.modified_at) return 'modified';
   return r.payment_status;
 }
 
@@ -67,16 +80,11 @@ export default function AdminReservas() {
     useCallback(() => {
       void (async () => {
         setLoading(true);
-
         const reservationsRes = await supabase
           .from('reservations')
-          .select(
-            'id,start_date,end_date,payment_status,status,full_name,total_amount_cents,refund_amount_cents,cancelled_at,user_id',
-          )
+          .select('id,start_date,end_date,payment_status,status,full_name,total_amount_cents,refund_amount_cents,cancelled_at,modified_at,user_id')
           .order('start_date', { ascending: false });
-
         setReservations((reservationsRes.data ?? []) as Reservation[]);
-
         setLoading(false);
       })();
     }, []),
@@ -87,8 +95,7 @@ export default function AdminReservas() {
       const display = reservationDisplayStatus(r);
       if (display !== statusFilter) return false;
     }
-    if (searchId.trim() && !String(r.id).includes(searchId.trim()))
-      return false;
+    if (searchId.trim() && !String(r.id).includes(searchId.trim())) return false;
     if (searchName.trim()) {
       const name = (r.full_name ?? '').toLowerCase();
       if (!name.includes(searchName.trim().toLowerCase())) return false;
@@ -105,47 +112,31 @@ export default function AdminReservas() {
   });
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F7F8FB' }}>
-      {/* Cabecera */}
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={styles.header}>
-        <Pressable
-          onPress={() => router.replace('/admin/places')}
-          style={styles.backBtn}
-        >
+        <Pressable onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backText}>‹ Volver</Text>
         </Pressable>
         <Text style={styles.pageTitle}>Reservas</Text>
         <View style={{ width: 70 }} />
       </View>
 
-      {/* Filtros */}
       <View style={styles.filtersCard}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={{ marginBottom: 10 }}
-        >
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             {[
               { key: 'all', label: 'Todas' },
-              { key: 'paid', label: '✅ Pagadas' },
-              { key: 'refunded', label: '↩️ Reembolsadas' },
-              { key: 'cancelled', label: '❌ Canceladas' },
+              { key: 'paid', label: 'Pagadas' },
+              { key: 'modified', label: 'Modificadas' },
+              { key: 'refunded', label: 'Reembolsadas' },
+              { key: 'cancelled', label: 'Canceladas' },
             ].map((s) => (
               <Pressable
                 key={s.key}
                 onPress={() => setStatusFilter(s.key)}
-                style={[
-                  styles.chip,
-                  statusFilter === s.key && styles.chipActive,
-                ]}
+                style={[styles.chip, statusFilter === s.key && styles.chipActive]}
               >
-                <Text
-                  style={[
-                    styles.chipText,
-                    statusFilter === s.key && styles.chipTextActive,
-                  ]}
-                >
+                <Text style={[styles.chipText, statusFilter === s.key && styles.chipTextActive]}>
                   {s.label}
                 </Text>
               </Pressable>
@@ -153,40 +144,13 @@ export default function AdminReservas() {
           </View>
         </ScrollView>
 
-        <TextInput
-          value={searchId}
-          onChangeText={setSearchId}
-          placeholder="Buscar por ID de reserva"
-          style={styles.input}
-          keyboardType="numeric"
-        />
-
-        <TextInput
-          value={searchName}
-          onChangeText={setSearchName}
-          placeholder="Buscar por nombre"
-          style={[styles.input, { marginTop: 8 }]}
-          autoCapitalize="words"
-        />
+        <TextInput value={searchId} onChangeText={setSearchId} placeholder="Buscar por ID de reserva" style={styles.input} keyboardType="numeric" />
+        <TextInput value={searchName} onChangeText={setSearchName} placeholder="Buscar por nombre" style={[styles.input, { marginTop: 8 }]} autoCapitalize="words" />
 
         <View style={styles.dateRangeRow}>
-          <TextInput
-            value={searchFrom}
-            onChangeText={setSearchFrom}
-            placeholder="Desde DD/MM/YYYY"
-            style={[styles.input, { flex: 1 }]}
-            keyboardType="numeric"
-            maxLength={10}
-          />
+          <TextInput value={searchFrom} onChangeText={setSearchFrom} placeholder="Desde DD/MM/YYYY" style={[styles.input, { flex: 1 }]} keyboardType="numeric" maxLength={10} />
           <Text style={styles.dateRangeSep}>→</Text>
-          <TextInput
-            value={searchTo}
-            onChangeText={setSearchTo}
-            placeholder="Hasta DD/MM/YYYY"
-            style={[styles.input, { flex: 1 }]}
-            keyboardType="numeric"
-            maxLength={10}
-          />
+          <TextInput value={searchTo} onChangeText={setSearchTo} placeholder="Hasta DD/MM/YYYY" style={[styles.input, { flex: 1 }]} keyboardType="numeric" maxLength={10} />
         </View>
 
         <Text style={styles.resultCount}>
@@ -194,69 +158,46 @@ export default function AdminReservas() {
         </Text>
       </View>
 
-      {/* Lista */}
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" />
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.listContainer}>
           {filtered.length === 0 ? (
-            <Text style={styles.emptyText}>
-              No hay reservas con estos filtros.
-            </Text>
+            <Text style={styles.emptyText}>No hay reservas con estos filtros.</Text>
           ) : (
-            filtered.map((r) => (
-              <Pressable
-                key={r.id}
-                onPress={() =>
-                  router.push({
-                    pathname: `/admin/places/${r.id}`,
-                    params: { from: 'reservas' },
-                  })
-                }
-                style={({ pressed }) => [
-                  styles.card,
-                  pressed && { opacity: 0.75 },
-                ]}
-              >
-                <View style={styles.cardTop}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.cardName}>
-                      {r.full_name ?? 'Sin nombre'}
-                    </Text>
-                    <Text style={styles.cardId}>
-                      #{r.id}
-                    </Text>
-                  </View>
-                  <View style={styles.cardRight}>
-                    <View
-                      style={[
-                        styles.badge,
-                        {
-                          backgroundColor:
-                            STATUS_COLORS[reservationDisplayStatus(r)] ?? '#eee',
-                        },
-                      ]}
-                    >
-                      <Text style={styles.badgeText}>
-                        {STATUS_LABELS[reservationDisplayStatus(r)] ??
-                          r.payment_status}
-                      </Text>
+            filtered.map((r) => {
+              const ds = reservationDisplayStatus(r);
+              return (
+                <Pressable
+                  key={r.id}
+                  onPress={() => router.push(`/admin/places/${r.id}`)}
+                  style={({ pressed }) => [styles.card, pressed && { opacity: 0.75 }]}
+                >
+                  <View style={styles.cardTop}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.cardName}>{r.full_name ?? 'Sin nombre'}</Text>
+                      <Text style={styles.cardId}>#{r.id}</Text>
                     </View>
-                    <Text style={styles.chevron}>›</Text>
+                    <View style={styles.cardRight}>
+                      <View style={[styles.badge, { backgroundColor: STATUS_COLORS[ds] ?? colors.surfaceContainerHigh }]}>
+                        <Text style={[styles.badgeText, { color: STATUS_TEXT_COLORS[ds] ?? colors.onSurface }]}>
+                          {STATUS_LABELS[ds] ?? r.payment_status}
+                        </Text>
+                      </View>
+                      <Text style={styles.chevron}>›</Text>
+                    </View>
                   </View>
-                </View>
-                <View style={styles.cardBottom}>
-                  <Text style={styles.cardDates}>
-                    📅 {formatDate(r.start_date)} → {formatDate(r.end_date)}
-                  </Text>
-                  <Text style={styles.cardAmount}>
-                    {formatEuro(r.total_amount_cents)}
-                  </Text>
-                </View>
-              </Pressable>
-            ))
+                  <View style={styles.cardBottom}>
+                    <Text style={styles.cardDates}>
+                      {formatDate(r.start_date)} → {formatDate(r.end_date)}
+                    </Text>
+                    <Text style={styles.cardAmount}>{formatEuro(r.total_amount_cents)}</Text>
+                  </View>
+                </Pressable>
+              );
+            })
           )}
         </ScrollView>
       )}
@@ -271,99 +212,58 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
     paddingVertical: 12,
-    backgroundColor: '#F7F8FB',
+    backgroundColor: colors.background,
   },
   backBtn: { width: 70 },
-  backText: { color: '#007AFF', fontSize: 16, fontWeight: '600' },
-  pageTitle: { fontSize: 20, fontWeight: '800', color: '#111' },
+  backText: { ...typography.titleMd, color: colors.secondary },
+  pageTitle: { ...typography.titleLg },
 
   filtersCard: {
-    backgroundColor: 'white',
-    marginHorizontal: 16,
-    borderRadius: 16,
+    backgroundColor: colors.surfaceContainerLow,
+    marginHorizontal: spacing.lg,
+    borderRadius: radii.lg,
     padding: 14,
     marginBottom: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
+    ...shadow.sm,
   },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: '#f0f0f0',
-  },
-  chipActive: { backgroundColor: '#007AFF' },
-  chipText: { fontSize: 13, fontWeight: '600', color: '#555' },
-  chipTextActive: { color: 'white' },
+  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radii.full, backgroundColor: colors.surfaceContainerHigh },
+  chipActive: { backgroundColor: colors.primary },
+  chipText: { ...typography.titleSm, color: colors.onSurfaceVariant },
+  chipTextActive: { color: colors.onPrimary },
 
   input: {
-    backgroundColor: '#F7F8FB',
+    backgroundColor: colors.inputSurface,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
+    borderColor: colors.outline,
+    borderRadius: radii.sm,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    fontSize: 14,
-    color: '#111',
+    ...typography.bodyMd,
+    color: colors.onSurface,
   },
-  dateRangeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 8,
-  },
-  dateRangeSep: { fontSize: 16, color: '#aaa', fontWeight: '700' },
-  resultCount: {
-    marginTop: 10,
-    fontSize: 12,
-    color: '#aaa',
-    fontWeight: '600',
-    textAlign: 'right',
-  },
+  dateRangeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 },
+  dateRangeSep: { ...typography.titleMd, color: colors.onSurfaceVariant },
+  resultCount: { marginTop: 10, ...typography.labelMd, textAlign: 'right' },
 
-  listContainer: { paddingHorizontal: 16, paddingBottom: 48, gap: 10 },
-  emptyText: {
-    textAlign: 'center',
-    color: '#aaa',
-    marginTop: 40,
-    fontSize: 15,
-  },
+  listContainer: { paddingHorizontal: spacing.lg, paddingBottom: 48, gap: 10 },
+  emptyText: { textAlign: 'center', ...typography.bodyMd, marginTop: 40 },
 
   card: {
-    backgroundColor: 'white',
-    borderRadius: 14,
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.md,
     padding: 14,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
+    ...shadow.sm,
   },
-  cardTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 10,
-  },
-  cardRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  cardName: { fontSize: 15, fontWeight: '700', color: '#111' },
-  cardId: { fontSize: 12, color: '#aaa', marginTop: 2 },
-  badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
-  badgeText: { fontSize: 11, fontWeight: '700', color: '#333' },
-  chevron: { fontSize: 20, color: '#ccc', fontWeight: '700' },
-  cardBottom: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  cardDates: { fontSize: 13, color: '#555' },
-  cardAmount: { fontSize: 14, fontWeight: '800', color: '#333' },
+  cardTop: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 },
+  cardRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  cardName: { ...typography.titleMd },
+  cardId: { ...typography.labelMd, marginTop: 2 },
+  badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: radii.full },
+  badgeText: { fontFamily: 'Inter_700Bold', fontSize: 11 },
+  chevron: { fontSize: 20, color: colors.onSurfaceVariant, fontFamily: 'PlusJakartaSans_700Bold' },
+  cardBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  cardDates: { ...typography.bodyMd },
+  cardAmount: { ...typography.titleSm, color: colors.onSurface },
 });

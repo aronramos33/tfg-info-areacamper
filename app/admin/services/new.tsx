@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
 import { pickImage, uploadServiceImage } from '../../../lib/uploadServiceImage';
+import { colors, radii, shadow, spacing, typography } from '@/lib/theme';
 
 type Tab = 'internal' | 'external';
 
@@ -45,7 +46,6 @@ export default function AdminServiceNew() {
 
     const cleanId = id.trim().toLowerCase().replace(/\s+/g, '_');
 
-    // Comprobar ID duplicado
     const { data: existing } = await supabase
       .from('services')
       .select('id')
@@ -67,7 +67,6 @@ export default function AdminServiceNew() {
         resolvedImageUrl = await uploadServiceImage(localImageUri, cleanId);
       }
 
-      // Calcular order_index
       const { data: all } = await supabase
         .from('services')
         .select('order_index')
@@ -237,7 +236,7 @@ export default function AdminServiceNew() {
             ]}
           >
             {saving ? (
-              <ActivityIndicator color="white" />
+              <ActivityIndicator color={colors.onPrimary} />
             ) : (
               <Text style={styles.btnCreateText}>Crear servicio</Text>
             )}
@@ -255,8 +254,8 @@ export default function AdminServiceNew() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#F7F8FB' },
-  container: { padding: 16, paddingBottom: 48, gap: 14 },
+  safe: { flex: 1, backgroundColor: colors.background },
+  container: { padding: spacing.lg, paddingBottom: 48, gap: 14 },
 
   headerRow: {
     flexDirection: 'row',
@@ -265,92 +264,73 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   backBtn: { width: 70, paddingVertical: 4 },
-  backText: { color: '#007AFF', fontSize: 16, fontWeight: '600' },
-  pageTitle: { fontSize: 20, fontWeight: '800', color: '#111' },
+  backText: { ...typography.titleMd, color: colors.secondary },
+  pageTitle: { ...typography.headlineMd },
 
   card: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 16,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
+    backgroundColor: colors.surfaceContainerLow,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    ...shadow.sm,
     gap: 4,
   },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#111',
-    marginBottom: 8,
-  },
+  sectionTitle: { ...typography.titleMd, marginBottom: 8 },
 
   toggleRow: {
     flexDirection: 'row',
-    backgroundColor: '#e8eaf0',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceContainerHigh,
+    borderRadius: radii.md,
     padding: 4,
   },
   toggleBtn: {
     flex: 1,
     paddingVertical: 10,
-    borderRadius: 10,
+    borderRadius: radii.sm,
     alignItems: 'center',
   },
   toggleBtnActive: {
-    backgroundColor: 'white',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 2,
+    backgroundColor: colors.surfaceContainerLow,
+    ...shadow.sm,
   },
-  toggleText: { fontSize: 13, fontWeight: '600', color: '#888' },
-  toggleTextActive: { color: '#007AFF' },
+  toggleText: { ...typography.titleSm, color: colors.onSurfaceVariant },
+  toggleTextActive: { color: colors.secondary },
 
-  fieldLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#666',
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  hint: { fontSize: 11, color: '#aaa', marginTop: 2 },
+  fieldLabel: { ...typography.labelMd, marginTop: 12, marginBottom: 4 },
+  hint: { fontSize: 11, color: colors.onSurfaceVariant, marginTop: 2, fontFamily: 'Inter_400Regular' },
 
   input: {
-    backgroundColor: '#F7F8FB',
+    backgroundColor: colors.inputSurface,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
+    borderColor: colors.outline,
+    borderRadius: radii.sm,
     paddingHorizontal: 12,
     paddingVertical: Platform.select({ ios: 12, android: 10 }),
-    fontSize: 15,
-    color: '#111',
+    ...typography.bodyLg,
+    color: colors.onSurface,
   },
   inputMultiline: {
-    backgroundColor: '#F7F8FB',
+    backgroundColor: colors.inputSurface,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
+    borderColor: colors.outline,
+    borderRadius: radii.sm,
     paddingHorizontal: 12,
     paddingTop: 12,
-    fontSize: 15,
-    color: '#111',
+    ...typography.bodyLg,
+    color: colors.onSurface,
     minHeight: 120,
   },
   inputRequired: {
-    borderColor: '#ffcdd2',
-    backgroundColor: '#fff8f8',
+    borderColor: colors.error,
+    backgroundColor: colors.errorContainer,
   },
 
   imagePicker: {
     height: 160,
-    borderRadius: 10,
+    borderRadius: radii.sm,
     overflow: 'hidden',
-    backgroundColor: '#F0F2F5',
+    backgroundColor: colors.inputSurface,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: colors.outline,
   },
   imagePickerPreview: {
     width: '100%',
@@ -361,13 +341,13 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: colors.overlay,
     paddingVertical: 8,
     alignItems: 'center',
   },
   imagePickerOverlayText: {
-    color: 'white',
-    fontWeight: '600',
+    color: colors.onPrimary,
+    fontFamily: 'Inter_600SemiBold',
     fontSize: 13,
   },
   imagePickerEmpty: {
@@ -377,22 +357,22 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   imagePickerEmptyIcon: { fontSize: 28 },
-  imagePickerEmptyText: { color: '#999', fontSize: 13, fontWeight: '600' },
+  imagePickerEmptyText: { ...typography.bodyMd },
 
   btnCreate: {
-    backgroundColor: '#007AFF',
+    backgroundColor: colors.primary,
     paddingVertical: 15,
-    borderRadius: 14,
+    borderRadius: radii.md,
     alignItems: 'center',
     marginTop: 4,
+    ...shadow.sm,
   },
-  btnDisabled: { backgroundColor: '#b0bec5' },
-  btnCreateText: { color: 'white', fontWeight: '800', fontSize: 16 },
+  btnDisabled: { backgroundColor: colors.surfaceContainerHigh, ...shadow.sm },
+  btnCreateText: { ...typography.titleMd, color: colors.onPrimary },
 
   requiredNote: {
     textAlign: 'center',
-    fontSize: 12,
-    color: '#aaa',
+    ...typography.labelMd,
     marginTop: 4,
   },
 });
