@@ -43,6 +43,7 @@ yarn-error.*
 
 # Claude Code (local AI assistant config — never commit)
 .claude/
+.gitignore
 
 # Temp files
 *temp_docx_output.txt
